@@ -30,12 +30,20 @@ export default function App() {
   // State info ukuran foto
   const [fileSizeInfo, setFileSizeInfo] = useState({ original: '', compressed: '' });
 
+  // State Modal standar
   const [modal, setModal] = useState({
     isOpen: false,
     title: '',
     message: '',
     type: 'info',
     onConfirm: null
+  });
+
+  // State khusus Modal Pengembalian (dengan input tanggal)
+  const [returnModal, setReturnModal] = useState({
+    isOpen: false,
+    log: null,
+    returnDate: new Date().toISOString().split('T')[0]
   });
 
   const [formData, setFormData] = useState({
@@ -159,7 +167,6 @@ export default function App() {
     return totalMasuk - totalKeluar;
   };
 
-  // UPLOAD FOTO + AUTO KOMPRESI
   const handleFileUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -269,38 +276,45 @@ export default function App() {
     }
   };
 
-  // FITUR 1: KEMBALIKAN BARANG PINJAMAN OTOMATIS
-  const handleReturnItem = async (log) => {
-    showConfirm(
-      'Konfirmasi Pengembalian',
-      `Apakah barang "${log.nama}" sejumlah ${log.qty} unit sudah benar-benar dikembalikan ke gudang?`,
-      async () => {
-        const payload = {
-          tipe: 'Barang Masuk',
-          asal: `Pengembalian Pinjaman (${log.asal || 'Tanpa SJ'})`,
-          sn: log.sn,
-          nama: log.nama,
-          qty: parseInt(log.qty),
-          tanggal: new Date().toISOString().split('T')[0],
-          ket: `[DIKEMBALIKAN] Dari peminjaman ID #${log.id}`,
-          foto_url: log.foto_url
-        };
-
-        const { error } = await supabase.from('stok_barang').insert([payload]);
-
-        if (error) {
-          showAlert('Gagal', 'Gagal memproses pengembalian: ' + error.message, 'danger');
-        } else {
-          showAlert('Berhasil!', `Stok "${log.nama}" sebanyak ${log.qty} unit telah kembali ke gudang!`, 'info');
-          fetchLogs();
-          fetchAllLogsForStock();
-        }
-        closeModal();
-      }
-    );
+  // 1. MEMBUKA MODAL PENGEMBALIAN BARANG
+  const openReturnModal = (log) => {
+    setReturnModal({
+      isOpen: true,
+      log: log,
+      returnDate: new Date().toISOString().split('T')[0]
+    });
   };
 
-  // FITUR 2: CETAK BUKTI TRANSAKSI / SURAT JALAN KE PDF
+  // 2. PROSES PENGEMBALIAN BARANG DENGAN TANGGAL & KETERANGAN LEBIH JELAS
+  const handleConfirmReturn = async () => {
+    const { log, returnDate } = returnModal;
+    if (!log) return;
+
+    const payload = {
+      tipe: 'Barang Masuk',
+      asal: `Pengembalian Pinjaman (${log.asal || 'Tanpa SJ'})`,
+      sn: log.sn,
+      nama: log.nama,
+      qty: parseInt(log.qty),
+      tanggal: returnDate,
+      ket: `[DIKEMBALIKAN] Pinjaman tgl ${log.tanggal}`,
+      foto_url: log.foto_url
+    };
+
+    const { error } = await supabase.from('stok_barang').insert([payload]);
+
+    if (error) {
+      showAlert('Gagal', 'Gagal memproses pengembalian: ' + error.message, 'danger');
+    } else {
+      showAlert('Berhasil!', `Stok "${log.nama}" (${log.qty} unit) berhasil dikembalikan pada tanggal ${returnDate}.`, 'info');
+      fetchLogs();
+      fetchAllLogsForStock();
+    }
+
+    setReturnModal({ isOpen: false, log: null, returnDate: new Date().toISOString().split('T')[0] });
+  };
+
+  // CETAK BUKTI PDF
   const handlePrintPDF = (log) => {
     const printWindow = window.open('', '_blank');
     const content = `
@@ -799,15 +813,16 @@ export default function App() {
                           <tr key={log.id} className="hover:bg-slate-800/40 transition-colors">
                             <td className="py-3 px-4">
                               {log.tipe === 'Barang Masuk' ? (
-                                <span className="px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                                /* BADGE TAMPILAN BARANG MASUK DIPERBAIKI SAMA KAYA MODE HEADER */
+                                <span className="inline-block px-2.5 py-1 rounded-full text-xs font-bold whitespace-nowrap bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
                                   Barang Masuk
                                 </span>
                               ) : isPinjam ? (
-                                <span className="px-2.5 py-1 rounded-full text-xs font-medium bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                                <span className="inline-block px-2.5 py-1 rounded-full text-xs font-bold whitespace-nowrap bg-amber-500/10 text-amber-400 border border-amber-500/20">
                                   🟡 Pinjam
                                 </span>
                               ) : (
-                                <span className="px-2.5 py-1 rounded-full text-xs font-medium bg-rose-500/10 text-rose-400 border border-rose-500/20">
+                                <span className="inline-block px-2.5 py-1 rounded-full text-xs font-bold whitespace-nowrap bg-rose-500/10 text-rose-400 border border-rose-500/20">
                                   🔴 Barang Keluar
                                 </span>
                               )}
@@ -828,11 +843,10 @@ export default function App() {
                               )}
                             </td>
                             
-                            {/* KOLOM AKSI DENGAN FITUR KEMBALIKAN & CETAK PDF */}
                             <td className="py-3 px-4 text-center flex items-center justify-center gap-1.5">
                               {isPinjam && (
                                 <button
-                                  onClick={() => handleReturnItem(log)}
+                                  onClick={() => openReturnModal(log)}
                                   className="px-2.5 py-1.5 bg-amber-500/10 hover:bg-amber-500 text-amber-400 hover:text-white rounded-lg text-xs font-medium border border-amber-500/20 transition-all"
                                   title="Kembalikan Stok Barang Pinjaman"
                                 >
@@ -868,7 +882,59 @@ export default function App() {
 
       </div>
 
-      {/* Modal Popup */}
+      {/* MODAL KHUSUS PENGEMBALIAN BARANG PINJAMAN (DENGAN INPUT TANGGAL) */}
+      {returnModal.isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 transition-all">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="p-3 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"/>
+                </svg>
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-white">Pengembalian Barang Pinjaman</h3>
+                <p className="text-xs text-slate-400">Konfirmasi barang masuk kembali ke gudang</p>
+              </div>
+            </div>
+
+            <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 text-xs space-y-2">
+              <p><strong className="text-slate-400">Nama Barang:</strong> <span className="text-white font-bold">{returnModal.log?.nama}</span></p>
+              <p><strong className="text-slate-400">Jumlah Dipinjam:</strong> <span className="text-emerald-400 font-bold">{returnModal.log?.qty} Unit</span></p>
+              <p><strong className="text-slate-400">Tanggal Pinjam:</strong> <span className="text-amber-300 font-bold">{returnModal.log?.tanggal}</span></p>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
+                Pilih Tanggal Dikembalikan:
+              </label>
+              <input
+                type="date"
+                value={returnModal.returnDate}
+                onChange={(e) => setReturnModal({ ...returnModal, returnDate: e.target.value })}
+                className="w-full bg-slate-950 border border-amber-500/40 rounded-xl px-4 py-2.5 text-slate-200 focus:outline-none focus:border-amber-500 text-sm"
+              />
+            </div>
+
+            <div className="flex gap-3 justify-end pt-2">
+              <button
+                onClick={() => setReturnModal({ isOpen: false, log: null, returnDate: new Date().toISOString().split('T')[0] })}
+                className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold transition-all"
+              >
+                Batal
+              </button>
+              <button
+                onClick={handleConfirmReturn}
+                className="px-5 py-2.5 bg-amber-600 hover:bg-amber-500 text-white rounded-xl text-xs font-semibold shadow-lg shadow-amber-950/50 transition-all"
+              >
+                Proses Dikembalikan
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Popup Standard */}
       {modal.isOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 transition-all">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-sm w-full p-6 shadow-2xl space-y-4">
