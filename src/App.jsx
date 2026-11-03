@@ -27,7 +27,7 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
 
-  // State untuk menyimpan informasi ukuran foto asli & hasil kompresi
+  // State untuk menyimpan info ukuran foto
   const [fileSizeInfo, setFileSizeInfo] = useState({ original: '', compressed: '' });
 
   const [modal, setModal] = useState({
@@ -159,7 +159,7 @@ export default function App() {
     return totalMasuk - totalKeluar;
   };
 
-  // FUNGSI UPLOAD FOTO DENGAN INFORMASI UKURAN FILE
+  // UPLOAD FOTO + KOMPRESI + HITUNG UKURAN
   const handleFileUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -173,7 +173,7 @@ export default function App() {
 
     setFileSizeInfo({ original: originalSizeText, compressed: '' });
 
-    // Opsi Kompresi (Maksimal 200 KB)
+    // Setting Kompresi (Maksimal 200 KB)
     const options = {
       maxSizeMB: 0.2,
       maxWidthOrHeight: 1200,
@@ -181,10 +181,10 @@ export default function App() {
     };
 
     try {
-      // 2. Kompres foto di browser
+      // 2. Kompres Foto Otomatis
       const compressedFile = await imageCompression(file, options);
 
-      // 3. Hitung Ukuran Foto Setelah Dikompres
+      // 3. Hitung Ukuran Setelah Dikompres
       const compMB = (compressedFile.size / 1024 / 1024).toFixed(2);
       const compKB = (compressedFile.size / 1024).toFixed(0);
       const compressedSizeText = compressedFile.size >= 1024 * 1024 ? `${compMB} MB` : `${compKB} KB`;
@@ -195,7 +195,7 @@ export default function App() {
       const fileName = `${Math.random()}.${fileExt}`;
       const filePath = `${fileName}`;
 
-      // 4. Upload foto yang sudah dikompres ke Supabase
+      // 4. Upload ke Supabase Bucket foto_barang
       const { error: uploadError } = await supabase.storage
         .from('foto_barang')
         .upload(filePath, compressedFile);
@@ -391,14 +391,15 @@ export default function App() {
               <h1 className="text-3xl font-bold tracking-tight text-white flex items-center gap-2">
                 Stock Barang <span className="text-emerald-400">EDAN</span>
               </h1>
+              {/* BAGIAN HEADER YANG DISESUAIKAN BIAR LEBIH RAPI */}
               <p className="text-slate-400 text-sm mt-0.5 flex items-center gap-2">
-                Modul URL: 
-                <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold uppercase ${
+                Mode: 
+                <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold ${
                   activeTab === 'masuk' 
                     ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' 
                     : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
                 }`}>
-                  {activeTab === 'masuk' ? '/masuk' : '/keluar'}
+                  {activeTab === 'masuk' ? 'Barang Masuk' : 'Barang Keluar'}
                 </span>
               </p>
             </div>
@@ -540,7 +541,7 @@ export default function App() {
                 className="w-full text-sm text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-slate-800 file:text-slate-200 hover:file:bg-slate-700 cursor-pointer"
               />
               
-              {/* STATUS & TAMPILAN UKURAN FOTO */}
+              {/* TAMPILAN UKURAN FOTO ASLI VS KOMPRESI */}
               {uploading && <p className="text-xs text-indigo-400 mt-1">Mengompres & Uploading foto...</p>}
               
               {fileSizeInfo.original && !uploading && (
