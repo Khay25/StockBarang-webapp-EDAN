@@ -27,6 +27,9 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
 
+  // State untuk menyimpan informasi ukuran foto asli & hasil kompresi
+  const [fileSizeInfo, setFileSizeInfo] = useState({ original: '', compressed: '' });
+
   const [modal, setModal] = useState({
     isOpen: false,
     title: '',
@@ -156,12 +159,19 @@ export default function App() {
     return totalMasuk - totalKeluar;
   };
 
-  // FUNGSI UPLOAD FOTO DENGAN AUTO-KOMPRESI
+  // FUNGSI UPLOAD FOTO DENGAN INFORMASI UKURAN FILE
   const handleFileUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
 
     setUploading(true);
+
+    // 1. Hitung Ukuran Asli Foto
+    const origMB = (file.size / 1024 / 1024).toFixed(2);
+    const origKB = (file.size / 1024).toFixed(0);
+    const originalSizeText = file.size >= 1024 * 1024 ? `${origMB} MB` : `${origKB} KB`;
+
+    setFileSizeInfo({ original: originalSizeText, compressed: '' });
 
     // Opsi Kompresi (Maksimal 200 KB)
     const options = {
@@ -171,14 +181,21 @@ export default function App() {
     };
 
     try {
-      // 1. Kompres foto di browser
+      // 2. Kompres foto di browser
       const compressedFile = await imageCompression(file, options);
+
+      // 3. Hitung Ukuran Foto Setelah Dikompres
+      const compMB = (compressedFile.size / 1024 / 1024).toFixed(2);
+      const compKB = (compressedFile.size / 1024).toFixed(0);
+      const compressedSizeText = compressedFile.size >= 1024 * 1024 ? `${compMB} MB` : `${compKB} KB`;
+
+      setFileSizeInfo({ original: originalSizeText, compressed: compressedSizeText });
       
       const fileExt = file.name.split('.').pop();
       const fileName = `${Math.random()}.${fileExt}`;
       const filePath = `${fileName}`;
 
-      // 2. Upload foto yang sudah dikompres ke Supabase
+      // 4. Upload foto yang sudah dikompres ke Supabase
       const { error: uploadError } = await supabase.storage
         .from('foto_barang')
         .upload(filePath, compressedFile);
@@ -251,6 +268,7 @@ export default function App() {
         status_keluar: 'Keluar Permanen',
         foto_url: ''
       });
+      setFileSizeInfo({ original: '', compressed: '' });
       fetchLogs();
       fetchAllLogsForStock();
     }
@@ -521,7 +539,25 @@ export default function App() {
                 onChange={handleFileUpload}
                 className="w-full text-sm text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-slate-800 file:text-slate-200 hover:file:bg-slate-700 cursor-pointer"
               />
+              
+              {/* STATUS & TAMPILAN UKURAN FOTO */}
               {uploading && <p className="text-xs text-indigo-400 mt-1">Mengompres & Uploading foto...</p>}
+              
+              {fileSizeInfo.original && !uploading && (
+                <div className="mt-2 text-xs flex items-center gap-2 bg-slate-950/80 p-2 rounded-lg border border-slate-800">
+                  <span className="text-slate-400">
+                    Awal: <strong className="text-rose-400">{fileSizeInfo.original}</strong>
+                  </span>
+                  {fileSizeInfo.compressed && (
+                    <>
+                      <span className="text-slate-600">➔</span>
+                      <span className="text-slate-400">
+                        Hasil: <strong className="text-emerald-400">{fileSizeInfo.compressed}</strong>
+                      </span>
+                    </>
+                  )}
+                </div>
+              )}
             </div>
 
             <div className="md:col-span-2 lg:col-span-3">
