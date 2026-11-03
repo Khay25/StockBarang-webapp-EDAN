@@ -27,7 +27,7 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
 
-  // State untuk menyimpan info ukuran foto
+  // State info ukuran foto
   const [fileSizeInfo, setFileSizeInfo] = useState({ original: '', compressed: '' });
 
   const [modal, setModal] = useState({
@@ -159,21 +159,19 @@ export default function App() {
     return totalMasuk - totalKeluar;
   };
 
-  // UPLOAD FOTO + KOMPRESI + HITUNG UKURAN
+  // UPLOAD FOTO + AUTO KOMPRESI
   const handleFileUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
 
     setUploading(true);
 
-    // 1. Hitung Ukuran Asli Foto
     const origMB = (file.size / 1024 / 1024).toFixed(2);
     const origKB = (file.size / 1024).toFixed(0);
     const originalSizeText = file.size >= 1024 * 1024 ? `${origMB} MB` : `${origKB} KB`;
 
     setFileSizeInfo({ original: originalSizeText, compressed: '' });
 
-    // Setting Kompresi (Maksimal 200 KB)
     const options = {
       maxSizeMB: 0.2,
       maxWidthOrHeight: 1200,
@@ -181,10 +179,8 @@ export default function App() {
     };
 
     try {
-      // 2. Kompres Foto Otomatis
       const compressedFile = await imageCompression(file, options);
 
-      // 3. Hitung Ukuran Setelah Dikompres
       const compMB = (compressedFile.size / 1024 / 1024).toFixed(2);
       const compKB = (compressedFile.size / 1024).toFixed(0);
       const compressedSizeText = compressedFile.size >= 1024 * 1024 ? `${compMB} MB` : `${compKB} KB`;
@@ -195,7 +191,6 @@ export default function App() {
       const fileName = `${Math.random()}.${fileExt}`;
       const filePath = `${fileName}`;
 
-      // 4. Upload ke Supabase Bucket foto_barang
       const { error: uploadError } = await supabase.storage
         .from('foto_barang')
         .upload(filePath, compressedFile);
@@ -274,6 +269,105 @@ export default function App() {
     }
   };
 
+  // FITUR 1: KEMBALIKAN BARANG PINJAMAN OTOMATIS
+  const handleReturnItem = async (log) => {
+    showConfirm(
+      'Konfirmasi Pengembalian',
+      `Apakah barang "${log.nama}" sejumlah ${log.qty} unit sudah benar-benar dikembalikan ke gudang?`,
+      async () => {
+        const payload = {
+          tipe: 'Barang Masuk',
+          asal: `Pengembalian Pinjaman (${log.asal || 'Tanpa SJ'})`,
+          sn: log.sn,
+          nama: log.nama,
+          qty: parseInt(log.qty),
+          tanggal: new Date().toISOString().split('T')[0],
+          ket: `[DIKEMBALIKAN] Dari peminjaman ID #${log.id}`,
+          foto_url: log.foto_url
+        };
+
+        const { error } = await supabase.from('stok_barang').insert([payload]);
+
+        if (error) {
+          showAlert('Gagal', 'Gagal memproses pengembalian: ' + error.message, 'danger');
+        } else {
+          showAlert('Berhasil!', `Stok "${log.nama}" sebanyak ${log.qty} unit telah kembali ke gudang!`, 'info');
+          fetchLogs();
+          fetchAllLogsForStock();
+        }
+        closeModal();
+      }
+    );
+  };
+
+  // FITUR 2: CETAK BUKTI TRANSAKSI / SURAT JALAN KE PDF
+  const handlePrintPDF = (log) => {
+    const printWindow = window.open('', '_blank');
+    const content = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Bukti Transaksi EDAN #${log.id}</title>
+        <style>
+          body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 40px; color: #1e293b; background: #fff; }
+          .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 3px solid #059669; padding-bottom: 20px; }
+          .title { font-size: 26px; font-weight: 800; color: #0f172a; letter-spacing: -0.5px; }
+          .subtitle { font-size: 13px; color: #64748b; margin-top: 4px; }
+          .badge { display: inline-block; padding: 6px 14px; border-radius: 20px; font-weight: bold; font-size: 12px; text-transform: uppercase; background: ${log.tipe === 'Barang Masuk' ? '#d1fae5' : '#ffe4e6'}; color: ${log.tipe === 'Barang Masuk' ? '#047857' : '#be123c'}; }
+          .details-table { width: 100%; border-collapse: collapse; margin-top: 30px; }
+          .details-table th, .details-table td { padding: 12px 16px; border: 1px solid #cbd5e1; text-align: left; font-size: 14px; }
+          .details-table th { background-color: #f8fafc; font-weight: 600; width: 30%; }
+          .signature-container { margin-top: 70px; display: flex; justify-content: space-between; padding: 0 40px; }
+          .signature-box { text-align: center; width: 220px; }
+          .signature-line { margin-top: 80px; border-bottom: 1.5px solid #475569; }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <div>
+            <div class="title">STOCK BARANG <span style="color:#059669">EDAN</span></div>
+            <div class="subtitle">Dokumen Resmi Bukti Transaksi Gudang</div>
+          </div>
+          <div>
+            <span class="badge">${log.tipe}</span>
+          </div>
+        </div>
+
+        <table class="details-table">
+          <tr><th>ID Transaksi</th><td>#${log.id}</td></tr>
+          <tr><th>Tanggal Transaksi</th><td>${log.tanggal}</td></tr>
+          <tr><th>Surat Jalan / Asal</th><td>${log.asal || '-'}</td></tr>
+          <tr><th>Serial Number (SN)</th><td>${log.sn || '-'}</td></tr>
+          <tr><th>Nama Barang</th><td><strong>${log.nama}</strong></td></tr>
+          <tr><th>Jumlah (QTY)</th><td><strong>${log.qty} Unit</strong></td></tr>
+          <tr><th>Keterangan</th><td>${log.ket || '-'}</td></tr>
+        </table>
+
+        <div class="signature-container">
+          <div class="signature-box">
+            <p style="font-weight:600; font-size:13px;">Petugas Gudang</p>
+            <div class="signature-line"></div>
+          </div>
+          <div class="signature-box">
+            <p style="font-weight:600; font-size:13px;">Penerima / Penanggung Jawab</p>
+            <div class="signature-line"></div>
+          </div>
+        </div>
+
+        <script>
+          window.onload = function() {
+            window.print();
+            window.onafterprint = function() { window.close(); };
+          };
+        </script>
+      </body>
+      </html>
+    `;
+
+    printWindow.document.write(content);
+    printWindow.document.close();
+  };
+
   const handleDelete = (id) => {
     showConfirm('Konfirmasi Hapus', 'Apakah kamu yakin ingin menghapus data ini?', async () => {
       const { error } = await supabase.from('stok_barang').delete().eq('id', id);
@@ -312,14 +406,14 @@ export default function App() {
     XLSX.utils.book_append_sheet(workbook, worksheet, activeTab === 'masuk' ? 'Barang Masuk' : 'Barang Keluar');
 
     worksheet['!cols'] = [
-      { wch: 6 },   // No
-      { wch: 18 },  // Tipe Transaksi
-      { wch: 20 },  // Surat Jalan / Asal
-      { wch: 20 },  // SN
-      { wch: 30 },  // Nama Barang
-      { wch: 15 },  // Qty
-      { wch: 18 },  // Tanggal
-      { wch: 35 }   // Keterangan
+      { wch: 6 },
+      { wch: 18 },
+      { wch: 20 },
+      { wch: 20 },
+      { wch: 30 },
+      { wch: 15 },
+      { wch: 18 },
+      { wch: 35 }
     ];
 
     const fileName = `Laporan_${activeTab === 'masuk' ? 'Barang_Masuk' : 'Barang_Keluar'}_EDAN_${new Date().toISOString().split('T')[0]}.xlsx`;
@@ -391,7 +485,6 @@ export default function App() {
               <h1 className="text-3xl font-bold tracking-tight text-white flex items-center gap-2">
                 Stock Barang <span className="text-emerald-400">EDAN</span>
               </h1>
-              {/* BAGIAN HEADER YANG DISESUAIKAN BIAR LEBIH RAPI */}
               <p className="text-slate-400 text-sm mt-0.5 flex items-center gap-2">
                 Mode: 
                 <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold ${
@@ -541,7 +634,6 @@ export default function App() {
                 className="w-full text-sm text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-slate-800 file:text-slate-200 hover:file:bg-slate-700 cursor-pointer"
               />
               
-              {/* TAMPILAN UKURAN FOTO ASLI VS KOMPRESI */}
               {uploading && <p className="text-xs text-indigo-400 mt-1">Mengompres & Uploading foto...</p>}
               
               {fileSizeInfo.original && !uploading && (
@@ -654,7 +746,6 @@ export default function App() {
             </div>
           </div>
 
-          {/* Info Card Sisa Stok Real-Time saat Pencarian */}
           {searchedItemName && (
             <div className="bg-emerald-950/40 border border-emerald-500/30 rounded-xl p-4 flex items-center justify-between">
               <div>
@@ -736,10 +827,30 @@ export default function App() {
                                 <span className="text-xs text-slate-600">Tidak ada</span>
                               )}
                             </td>
-                            <td className="py-3 px-4 text-center">
+                            
+                            {/* KOLOM AKSI DENGAN FITUR KEMBALIKAN & CETAK PDF */}
+                            <td className="py-3 px-4 text-center flex items-center justify-center gap-1.5">
+                              {isPinjam && (
+                                <button
+                                  onClick={() => handleReturnItem(log)}
+                                  className="px-2.5 py-1.5 bg-amber-500/10 hover:bg-amber-500 text-amber-400 hover:text-white rounded-lg text-xs font-medium border border-amber-500/20 transition-all"
+                                  title="Kembalikan Stok Barang Pinjaman"
+                                >
+                                  ↩ Balik
+                                </button>
+                              )}
+
+                              <button
+                                onClick={() => handlePrintPDF(log)}
+                                className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg text-xs font-medium border border-slate-700 transition-all"
+                                title="Cetak Bukti PDF"
+                              >
+                                🖨️ PDF
+                              </button>
+
                               <button
                                 onClick={() => handleDelete(log.id)}
-                                className="px-3 py-1.5 bg-rose-500/10 hover:bg-rose-500 text-rose-400 hover:text-white rounded-lg text-xs font-medium border border-rose-500/20 transition-all"
+                                className="px-2.5 py-1.5 bg-rose-500/10 hover:bg-rose-500 text-rose-400 hover:text-white rounded-lg text-xs font-medium border border-rose-500/20 transition-all"
                               >
                                 Hapus
                               </button>
@@ -791,7 +902,7 @@ export default function App() {
                     onClick={modal.onConfirm}
                     className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-semibold shadow-lg shadow-rose-950/50 transition-all"
                   >
-                    Ya, Hapus
+                    Ya, Lanjutkan
                   </button>
                 </>
               ) : (
