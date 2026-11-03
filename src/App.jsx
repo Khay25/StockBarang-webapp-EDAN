@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { supabase } from './supabaseClient';
 import * as XLSX from 'xlsx';
+import imageCompression from 'browser-image-compression';
 import logoEdan from './logoedan.png';
 import Login from './login';
 
@@ -155,29 +156,47 @@ export default function App() {
     return totalMasuk - totalKeluar;
   };
 
+  // FUNGSI UPLOAD FOTO DENGAN AUTO-KOMPRESI
   const handleFileUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
 
     setUploading(true);
-    const fileExt = file.name.split('.').pop();
-    const fileName = `${Math.random()}.${fileExt}`;
-    const filePath = `${fileName}`;
 
-    const { error: uploadError } = await supabase.storage
-      .from('foto_barang')
-      .upload(filePath, file);
+    // Opsi Kompresi (Maksimal 200 KB)
+    const options = {
+      maxSizeMB: 0.2,
+      maxWidthOrHeight: 1200,
+      useWebWorker: true,
+    };
 
-    if (uploadError) {
-      showAlert('Gagal Upload', 'Gagal upload foto: ' + uploadError.message, 'danger');
-    } else {
-      const { data } = supabase.storage
-        .from('foto_barang')
-        .getPublicUrl(filePath);
+    try {
+      // 1. Kompres foto di browser
+      const compressedFile = await imageCompression(file, options);
       
-      setFormData(prev => ({ ...prev, foto_url: data.publicUrl }));
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${Math.random()}.${fileExt}`;
+      const filePath = `${fileName}`;
+
+      // 2. Upload foto yang sudah dikompres ke Supabase
+      const { error: uploadError } = await supabase.storage
+        .from('foto_barang')
+        .upload(filePath, compressedFile);
+
+      if (uploadError) {
+        showAlert('Gagal Upload', 'Gagal upload foto: ' + uploadError.message, 'danger');
+      } else {
+        const { data } = supabase.storage
+          .from('foto_barang')
+          .getPublicUrl(filePath);
+        
+        setFormData(prev => ({ ...prev, foto_url: data.publicUrl }));
+      }
+    } catch (error) {
+      showAlert('Gagal Kompres', 'Error saat mengompres foto: ' + error.message, 'danger');
+    } finally {
+      setUploading(false);
     }
-    setUploading(false);
   };
 
   const handleSubmit = async (e) => {
@@ -494,7 +513,7 @@ export default function App() {
 
             <div>
               <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
-                Foto Barang
+                Foto Barang (Auto Kompres)
               </label>
               <input
                 type="file"
@@ -502,7 +521,7 @@ export default function App() {
                 onChange={handleFileUpload}
                 className="w-full text-sm text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-slate-800 file:text-slate-200 hover:file:bg-slate-700 cursor-pointer"
               />
-              {uploading && <p className="text-xs text-indigo-400 mt-1">Uploading foto...</p>}
+              {uploading && <p className="text-xs text-indigo-400 mt-1">Mengompres & Uploading foto...</p>}
             </div>
 
             <div className="md:col-span-2 lg:col-span-3">
