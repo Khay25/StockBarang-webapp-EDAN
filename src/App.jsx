@@ -39,7 +39,7 @@ export default function App() {
     onConfirm: null
   });
 
-  // State khusus Modal Pengembalian (dengan input tanggal)
+  // State Modal Pengembalian
   const [returnModal, setReturnModal] = useState({
     isOpen: false,
     log: null,
@@ -276,7 +276,6 @@ export default function App() {
     }
   };
 
-  // 1. MEMBUKA MODAL PENGEMBALIAN BARANG
   const openReturnModal = (log) => {
     setReturnModal({
       isOpen: true,
@@ -285,7 +284,6 @@ export default function App() {
     });
   };
 
-  // 2. PROSES PENGEMBALIAN BARANG DENGAN TANGGAL & KETERANGAN LEBIH JELAS
   const handleConfirmReturn = async () => {
     const { log, returnDate } = returnModal;
     if (!log) return;
@@ -314,7 +312,6 @@ export default function App() {
     setReturnModal({ isOpen: false, log: null, returnDate: new Date().toISOString().split('T')[0] });
   };
 
-  // CETAK BUKTI PDF
   const handlePrintPDF = (log) => {
     const printWindow = window.open('', '_blank');
     const content = `
@@ -412,6 +409,7 @@ export default function App() {
       'Nama Barang': log.nama || '-',
       [activeTab === 'masuk' ? 'QTY Masuk' : 'QTY Keluar']: log.qty || 0,
       'Tanggal Transaksi': log.tanggal || '-',
+      'Jam Input': log.created_at ? new Date(log.created_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WIB' : '-',
       'Keterangan': log.ket || '-'
     }));
 
@@ -427,6 +425,7 @@ export default function App() {
       { wch: 30 },
       { wch: 15 },
       { wch: 18 },
+      { wch: 15 },
       { wch: 35 }
     ];
 
@@ -813,7 +812,6 @@ export default function App() {
                           <tr key={log.id} className="hover:bg-slate-800/40 transition-colors">
                             <td className="py-3 px-4">
                               {log.tipe === 'Barang Masuk' ? (
-                                /* BADGE TAMPILAN BARANG MASUK DIPERBAIKI SAMA KAYA MODE HEADER */
                                 <span className="inline-block px-2.5 py-1 rounded-full text-xs font-bold whitespace-nowrap bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
                                   Barang Masuk
                                 </span>
@@ -831,7 +829,20 @@ export default function App() {
                             <td className="py-3 px-4 font-mono text-slate-400">{log.sn || '-'}</td>
                             <td className="py-3 px-4 font-semibold text-white">{log.nama || '-'}</td>
                             <td className="py-3 px-4 font-bold text-emerald-400">{log.qty || 0} Unit</td>
-                            <td className="py-3 px-4 text-slate-400">{log.tanggal}</td>
+                            
+                            {/* KOLOM TANGGAL + JAM TRANSAKSI DISIMPISKAN */}
+                            <td className="py-3 px-4">
+                              <div className="text-slate-300 font-medium">{log.tanggal}</div>
+                              {log.created_at && (
+                                <div className="text-[10px] text-slate-500 flex items-center gap-1 mt-0.5">
+                                  <span>🕒</span>
+                                  <span>
+                                    {new Date(log.created_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })} WIB
+                                  </span>
+                                </div>
+                              )}
+                            </td>
+
                             <td className="py-3 px-4 text-slate-400">{log.ket || '-'}</td>
                             <td className="py-3 px-4">
                               {log.foto_url ? (
@@ -882,7 +893,7 @@ export default function App() {
 
       </div>
 
-      {/* MODAL KHUSUS PENGEMBALIAN BARANG PINJAMAN (DENGAN INPUT TANGGAL) */}
+      {/* MODAL PENGEMBALIAN BARANG */}
       {returnModal.isOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 transition-all">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
