@@ -30,7 +30,7 @@ export default function App() {
   // State info ukuran foto
   const [fileSizeInfo, setFileSizeInfo] = useState({ original: '', compressed: '' });
 
-  // State Modal standar
+  // State Modal standar (Alert/Confirm)
   const [modal, setModal] = useState({
     isOpen: false,
     title: '',
@@ -44,6 +44,19 @@ export default function App() {
     isOpen: false,
     log: null,
     returnDate: new Date().toISOString().split('T')[0]
+  });
+
+  // State Modal Edit Data
+  const [editModal, setEditModal] = useState({
+    isOpen: false,
+    id: null,
+    asal: '',
+    sn: '',
+    nama: '',
+    qty: '',
+    tanggal: '',
+    ket: '',
+    foto_url: ''
   });
 
   const [formData, setFormData] = useState({
@@ -167,7 +180,7 @@ export default function App() {
     return totalMasuk - totalKeluar;
   };
 
-  const handleFileUpload = async (e) => {
+  const handleFileUpload = async (e, isEditMode = false) => {
     const file = e.target.files[0];
     if (!file) return;
 
@@ -209,7 +222,11 @@ export default function App() {
           .from('foto_barang')
           .getPublicUrl(filePath);
         
-        setFormData(prev => ({ ...prev, foto_url: data.publicUrl }));
+        if (isEditMode) {
+          setEditModal(prev => ({ ...prev, foto_url: data.publicUrl }));
+        } else {
+          setFormData(prev => ({ ...prev, foto_url: data.publicUrl }));
+        }
       }
     } catch (error) {
       showAlert('Gagal Kompres', 'Error saat mengompres foto: ' + error.message, 'danger');
@@ -271,6 +288,53 @@ export default function App() {
         foto_url: ''
       });
       setFileSizeInfo({ original: '', compressed: '' });
+      fetchLogs();
+      fetchAllLogsForStock();
+    }
+  };
+
+  // OPEN EDIT MODAL
+  const openEditModal = (log) => {
+    setEditModal({
+      isOpen: true,
+      id: log.id,
+      asal: log.asal || '',
+      sn: log.sn || '',
+      nama: log.nama || '',
+      qty: log.qty || '',
+      tanggal: log.tanggal || '',
+      ket: log.ket || '',
+      foto_url: log.foto_url || ''
+    });
+  };
+
+  // HANDLE SIMPAN EDIT
+  const handleSaveEdit = async () => {
+    if (!editModal.nama || !editModal.qty) {
+      showAlert('Peringatan', 'Nama Barang dan Quantity tidak boleh kosong!', 'danger');
+      return;
+    }
+
+    const payload = {
+      asal: editModal.asal,
+      sn: editModal.sn,
+      nama: editModal.nama,
+      qty: parseInt(editModal.qty),
+      tanggal: editModal.tanggal,
+      ket: editModal.ket,
+      foto_url: editModal.foto_url
+    };
+
+    const { error } = await supabase
+      .from('stok_barang')
+      .update(payload)
+      .eq('id', editModal.id);
+
+    if (error) {
+      showAlert('Gagal Update', 'Error saat memperbarui data: ' + error.message, 'danger');
+    } else {
+      showAlert('Berhasil!', 'Data transaksi berhasil diperbarui.', 'info');
+      setEditModal({ isOpen: false, id: null, asal: '', sn: '', nama: '', qty: '', tanggal: '', ket: '', foto_url: '' });
       fetchLogs();
       fetchAllLogsForStock();
     }
@@ -643,7 +707,7 @@ export default function App() {
               <input
                 type="file"
                 accept="image/*"
-                onChange={handleFileUpload}
+                onChange={(e) => handleFileUpload(e, false)}
                 className="w-full text-sm text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-slate-800 file:text-slate-200 hover:file:bg-slate-700 cursor-pointer"
               />
               
@@ -830,7 +894,6 @@ export default function App() {
                             <td className="py-3 px-4 font-semibold text-white">{log.nama || '-'}</td>
                             <td className="py-3 px-4 font-bold text-emerald-400">{log.qty || 0} Unit</td>
                             
-                            {/* KOLOM TANGGAL + JAM TRANSAKSI DISIMPISKAN */}
                             <td className="py-3 px-4">
                               <div className="text-slate-300 font-medium">{log.tanggal}</div>
                               {log.created_at && (
@@ -865,6 +928,15 @@ export default function App() {
                                 </button>
                               )}
 
+                              {/* TOMBOL EDIT DATA BARU */}
+                              <button
+                                onClick={() => openEditModal(log)}
+                                className="px-2.5 py-1.5 bg-indigo-500/10 hover:bg-indigo-600 text-indigo-400 hover:text-white rounded-lg text-xs font-medium border border-indigo-500/20 transition-all"
+                                title="Edit Transaksi Ini"
+                              >
+                                ✏️ Edit
+                              </button>
+
                               <button
                                 onClick={() => handlePrintPDF(log)}
                                 className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg text-xs font-medium border border-slate-700 transition-all"
@@ -892,6 +964,127 @@ export default function App() {
         </div>
 
       </div>
+
+      {/* MODAL EDIT DATA TRANSAKSI */}
+      {editModal.isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 transition-all overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4 my-8">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2">
+                <span className="text-lg">✏️</span>
+                <h3 className="text-lg font-bold text-white">Edit Transaksi #{editModal.id}</h3>
+              </div>
+              <button 
+                onClick={() => setEditModal({ ...editModal, isOpen: false })}
+                className="text-slate-400 hover:text-white text-lg font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-left">
+              <div>
+                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">
+                  Surat Jalan / Asal
+                </label>
+                <input
+                  type="text"
+                  value={editModal.asal}
+                  onChange={e => setEditModal({ ...editModal, asal: e.target.value })}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 focus:outline-none focus:border-indigo-500 text-sm"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">
+                  Serial Number (SN)
+                </label>
+                <input
+                  type="text"
+                  value={editModal.sn}
+                  onChange={e => setEditModal({ ...editModal, sn: e.target.value })}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 focus:outline-none focus:border-indigo-500 text-sm"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">
+                  Nama Barang
+                </label>
+                <input
+                  type="text"
+                  value={editModal.nama}
+                  onChange={e => setEditModal({ ...editModal, nama: e.target.value })}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 focus:outline-none focus:border-indigo-500 text-sm"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">
+                  Quantity
+                </label>
+                <input
+                  type="number"
+                  value={editModal.qty}
+                  onChange={e => setEditModal({ ...editModal, qty: e.target.value })}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 focus:outline-none focus:border-indigo-500 text-sm"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">
+                  Tanggal Transaksi
+                </label>
+                <input
+                  type="date"
+                  value={editModal.tanggal}
+                  onChange={e => setEditModal({ ...editModal, tanggal: e.target.value })}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 focus:outline-none focus:border-indigo-500 text-sm"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">
+                  Ganti Foto (Opsional)
+                </label>
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => handleFileUpload(e, true)}
+                  className="w-full text-xs text-slate-400 file:mr-2 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-slate-800 file:text-slate-200 hover:file:bg-slate-700 cursor-pointer"
+                />
+              </div>
+
+              <div className="md:col-span-2">
+                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">
+                  Keterangan
+                </label>
+                <input
+                  type="text"
+                  value={editModal.ket}
+                  onChange={e => setEditModal({ ...editModal, ket: e.target.value })}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 focus:outline-none focus:border-indigo-500 text-sm"
+                />
+              </div>
+            </div>
+
+            <div className="flex gap-3 justify-end pt-3 border-t border-slate-800">
+              <button
+                onClick={() => setEditModal({ ...editModal, isOpen: false })}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold transition-all"
+              >
+                Batal
+              </button>
+              <button
+                onClick={handleSaveEdit}
+                className="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold shadow-lg shadow-indigo-950/50 transition-all"
+              >
+                Simpan Perubahan
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* MODAL PENGEMBALIAN BARANG */}
       {returnModal.isOpen && (
