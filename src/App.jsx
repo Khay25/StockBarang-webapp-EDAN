@@ -14,23 +14,29 @@ export default function App() {
   const location = useLocation();
   const navigate = useNavigate();
 
-  const activeTab = location.pathname === '/keluar' ? 'keluar' : 'masuk';
+  // Tab active: 'masuk', 'keluar', atau 'audit'
+  const activeTab = location.pathname === '/keluar' 
+    ? 'keluar' 
+    : location.pathname === '/audit' 
+    ? 'audit' 
+    : 'masuk';
 
   const [logs, setLogs] = useState([]);
   const [allLogs, setAllLogs] = useState([]);
+  const [auditLogsData, setAuditLogsData] = useState([]);
+  
   const [search, setSearch] = useState('');
   const [selectedMonth, setSelectedMonth] = useState('all');
   
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
+  const [onlyPinjam, setOnlyPinjam] = useState(false);
 
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
 
-  // State info ukuran foto
   const [fileSizeInfo, setFileSizeInfo] = useState({ original: '', compressed: '' });
 
-  // State Modal standar (Alert/Confirm)
   const [modal, setModal] = useState({
     isOpen: false,
     title: '',
@@ -39,14 +45,12 @@ export default function App() {
     onConfirm: null
   });
 
-  // State Modal Pengembalian
   const [returnModal, setReturnModal] = useState({
     isOpen: false,
     log: null,
     returnDate: new Date().toISOString().split('T')[0]
   });
 
-  // State Modal Edit Data
   const [editModal, setEditModal] = useState({
     isOpen: false,
     id: null,
@@ -96,6 +100,33 @@ export default function App() {
     return 'admin';
   };
 
+  // --- FUNGSI MENCATAT AUDIT LOG ---
+  const recordAudit = async (actionType, detailText) => {
+    try {
+      const userEmail = session?.user?.email || 'Unknown User';
+      await supabase.from('audit_logs').insert([
+        {
+          user_email: userEmail,
+          action: actionType,
+          detail: detailText
+        }
+      ]);
+    } catch (err) {
+      console.error("Gagal mencatat audit log:", err);
+    }
+  };
+
+  const fetchAuditLogs = async () => {
+    setLoading(true);
+    const { data } = await supabase
+      .from('audit_logs')
+      .select('*')
+      .order('created_at', { ascending: false });
+    
+    if (data) setAuditLogsData(data);
+    setLoading(false);
+  };
+
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
@@ -125,9 +156,15 @@ export default function App() {
 
       document.title = activeTab === 'masuk' 
         ? 'Halaman Barang Masuk - EDAN' 
-        : 'Halaman Barang Keluar - EDAN';
+        : activeTab === 'keluar'
+        ? 'Halaman Barang Keluar - EDAN'
+        : 'Audit Log System - EDAN';
 
-      fetchLogs();
+      if (activeTab === 'audit') {
+        fetchAuditLogs();
+      } else {
+        fetchLogs();
+      }
       fetchAllLogsForStock();
     }
   }, [activeTab, session, userRole, location.pathname]);
@@ -179,6 +216,29 @@ export default function App() {
 
     return totalMasuk - totalKeluar;
   };
+
+  // Stat Cards Dashboard
+  const currentMonthNum = new Date().toISOString().split('-')[1];
+
+  const totalJenisBarang = Array.from(new Set(allLogs.map(item => item.nama?.trim().toLowerCase()).filter(Boolean))).length;
+
+  const totalMasukBulanIni = allLogs
+    .filter(item => item.tipe === 'Barang Masuk' && item.tanggal?.split('-')[1] === currentMonthNum)
+    .reduce((acc, curr) => acc + (parseInt(curr.qty) || 0), 0);
+
+  const totalKeluarBulanIni = allLogs
+    .filter(item => item.tipe === 'Barang Keluar' && item.tanggal?.split('-')[1] === currentMonthNum)
+    .reduce((acc, curr) => acc + (parseInt(curr.qty) || 0), 0);
+
+  const totalDipinjam = allLogs
+    .filter(item => item.tipe === 'Barang Keluar' && item.ket?.includes('[DIPINJAM]'))
+    .reduce((acc, curr) => acc + (parseInt(curr.qty) || 0), 0);
+
+  const totalDikembalikan = allLogs
+    .filter(item => item.tipe === 'Barang Masuk' && item.asal?.includes('Pengembalian Pinjaman'))
+    .reduce((acc, curr) => acc + (parseInt(curr.qty) || 0), 0);
+
+  const sisaSedangDipinjam = Math.max(0, totalDipinjam - totalDikembalikan);
 
   const handleFileUpload = async (e, isEditMode = false) => {
     const file = e.target.files[0];
@@ -260,8 +320,10 @@ export default function App() {
       ? `[DIPINJAM] ${formData.ket}`
       : formData.ket;
 
+    const tipeLabel = activeTab === 'masuk' ? 'Barang Masuk' : 'Barang Keluar';
+
     const payload = {
-      tipe: activeTab === 'masuk' ? 'Barang Masuk' : 'Barang Keluar',
+      tipe: tipeLabel,
       asal: formData.asal,
       sn: formData.sn,
       nama: formData.nama,
@@ -276,7 +338,11 @@ export default function App() {
     if (error) {
       showAlert('Gagal Simpan', 'Gagal menyimpan data: ' + error.message, 'danger');
     } else {
-      showAlert('Berhasil!', `Data ${activeTab === 'masuk' ? 'Barang Masuk' : 'Barang Keluar'} sukses tersimpan.`, 'info');
+      showAlert('Berhasil!', `Data ${tipeLabel} sukses tersimpan.`, 'info');
+      
+      // CATAT KE AUDIT LOG
+      await recordAudit('TAMBAH', `Menambahkan ${tipeLabel}: "${formData.nama}" (${inputQty} Unit)`);
+
       setFormData({
         asal: '',
         sn: '',
@@ -293,7 +359,6 @@ export default function App() {
     }
   };
 
-  // OPEN EDIT MODAL
   const openEditModal = (log) => {
     setEditModal({
       isOpen: true,
@@ -304,11 +369,11 @@ export default function App() {
       qty: log.qty || '',
       tanggal: log.tanggal || '',
       ket: log.ket || '',
-      foto_url: log.foto_url || ''
+      foto_url: log.foto_url || '',
+      originalLog: log
     });
   };
 
-  // HANDLE SIMPAN EDIT
   const handleSaveEdit = async () => {
     if (!editModal.nama || !editModal.qty) {
       showAlert('Peringatan', 'Nama Barang dan Quantity tidak boleh kosong!', 'danger');
@@ -334,6 +399,14 @@ export default function App() {
       showAlert('Gagal Update', 'Error saat memperbarui data: ' + error.message, 'danger');
     } else {
       showAlert('Berhasil!', 'Data transaksi berhasil diperbarui.', 'info');
+      
+      // CATAT KE AUDIT LOG
+      const oldLog = editModal.originalLog;
+      await recordAudit(
+        'EDIT', 
+        `Mengubah Transaksi #${editModal.id} ("${oldLog.nama}") | Qty: ${oldLog.qty}➔${editModal.qty}, Tanggal: ${oldLog.tanggal}➔${editModal.tanggal}`
+      );
+
       setEditModal({ isOpen: false, id: null, asal: '', sn: '', nama: '', qty: '', tanggal: '', ket: '', foto_url: '' });
       fetchLogs();
       fetchAllLogsForStock();
@@ -369,6 +442,10 @@ export default function App() {
       showAlert('Gagal', 'Gagal memproses pengembalian: ' + error.message, 'danger');
     } else {
       showAlert('Berhasil!', `Stok "${log.nama}" (${log.qty} unit) berhasil dikembalikan pada tanggal ${returnDate}.`, 'info');
+      
+      // CATAT KE AUDIT LOG
+      await recordAudit('PENGEMBALIAN', `Memproses pengembalian pinjaman: "${log.nama}" (${log.qty} Unit)`);
+
       fetchLogs();
       fetchAllLogsForStock();
     }
@@ -443,10 +520,13 @@ export default function App() {
     printWindow.document.close();
   };
 
-  const handleDelete = (id) => {
-    showConfirm('Konfirmasi Hapus', 'Apakah kamu yakin ingin menghapus data ini?', async () => {
-      const { error } = await supabase.from('stok_barang').delete().eq('id', id);
+  const handleDelete = (log) => {
+    showConfirm('Konfirmasi Hapus', `Apakah kamu yakin ingin menghapus data "${log.nama}"?`, async () => {
+      const { error } = await supabase.from('stok_barang').delete().eq('id', log.id);
       if (!error) {
+        // CATAT KE AUDIT LOG
+        await recordAudit('HAPUS', `Menghapus Transaksi #${log.id} ("${log.nama}" - ${log.qty} Unit)`);
+
         fetchLogs();
         fetchAllLogsForStock();
       }
@@ -528,7 +608,9 @@ export default function App() {
       matchesDateRange = log.tanggal <= endDate;
     }
 
-    return matchesSearch && matchesMonth && matchesDateRange;
+    const matchesPinjam = onlyPinjam ? log.ket?.includes('[DIPINJAM]') : true;
+
+    return matchesSearch && matchesMonth && matchesDateRange && matchesPinjam;
   });
 
   const sortedMonths = monthsList.filter(m => m.value !== 'all');
@@ -567,9 +649,11 @@ export default function App() {
                 <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold ${
                   activeTab === 'masuk' 
                     ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' 
-                    : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
+                    : activeTab === 'keluar'
+                    ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
+                    : 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20'
                 }`}>
-                  {activeTab === 'masuk' ? 'Barang Masuk' : 'Barang Keluar'}
+                  {activeTab === 'masuk' ? 'Barang Masuk' : activeTab === 'keluar' ? 'Barang Keluar' : '📜 Audit Log'}
                 </span>
               </p>
             </div>
@@ -577,7 +661,7 @@ export default function App() {
 
           <div className="flex items-center gap-3">
             {userRole === 'admin' && (
-              <div className="flex bg-slate-900 p-1.5 rounded-2xl border border-slate-800">
+              <div className="flex bg-slate-900 p-1.5 rounded-2xl border border-slate-800 gap-1">
                 <button
                   onClick={() => navigate('/masuk')}
                   className={`px-4 py-2 text-xs font-semibold rounded-xl transition-all flex items-center gap-2 ${
@@ -600,6 +684,16 @@ export default function App() {
                   <span className="w-2 h-2 rounded-full bg-rose-400"></span>
                   Barang Keluar
                 </button>
+                <button
+                  onClick={() => navigate('/audit')}
+                  className={`px-4 py-2 text-xs font-semibold rounded-xl transition-all flex items-center gap-2 ${
+                    activeTab === 'audit'
+                      ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/40'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  📜 Audit Log
+                </button>
               </div>
             )}
 
@@ -612,356 +706,496 @@ export default function App() {
           </div>
         </div>
 
-        {/* Form Card */}
-        <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-6 backdrop-blur-xl shadow-xl">
-          <h2 className="text-xl font-semibold mb-6 text-slate-200 flex items-center gap-2">
-            <span className={`w-3 h-3 rounded-full ${activeTab === 'masuk' ? 'bg-emerald-500' : 'bg-rose-500'}`}></span>
-            Input khusus {activeTab === 'masuk' ? 'Barang Masuk' : 'Barang Keluar'}
-          </h2>
-
-          <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-            <div>
-              <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
-                Surat Jalan / Asal
-              </label>
-              <input
-                type="text"
-                value={formData.asal}
-                onChange={e => setFormData({ ...formData, asal: e.target.value })}
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-slate-200 focus:outline-none focus:border-indigo-500 transition-all text-sm"
-                placeholder="Contoh: SJ-001 / Vendor A"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
-                Serial Number (SN)
-              </label>
-              <input
-                type="text"
-                value={formData.sn}
-                onChange={e => setFormData({ ...formData, sn: e.target.value })}
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-slate-200 focus:outline-none focus:border-indigo-500 transition-all text-sm"
-                placeholder="SN12345678"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
-                Nama Barang
-              </label>
-              <input
-                type="text"
-                value={formData.nama}
-                onChange={e => setFormData({ ...formData, nama: e.target.value })}
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-slate-200 focus:outline-none focus:border-indigo-500 transition-all text-sm"
-                placeholder="Masukkan nama barang"
-              />
-            </div>
-
-            {activeTab === 'keluar' && (
+        {/* TAMPILAN KHUSUS TAB AUDIT LOG (ADMIN ONLY) */}
+        {activeTab === 'audit' ? (
+          <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-6 backdrop-blur-xl shadow-xl space-y-6">
+            <div className="flex justify-between items-center">
               <div>
-                <label className="block text-xs font-semibold text-amber-400 uppercase tracking-wider mb-2">
-                  Status Transaksi Keluar
-                </label>
-                <select
-                  value={formData.status_keluar}
-                  onChange={e => setFormData({ ...formData, status_keluar: e.target.value })}
-                  className="w-full bg-slate-950 border border-amber-500/40 rounded-xl px-4 py-2.5 text-amber-300 focus:outline-none focus:border-amber-500 transition-all text-sm font-semibold"
-                >
-                  <option value="Keluar Permanen">🔴 Keluar Permanen (Dijual/Pakai)</option>
-                  <option value="Pinjam">🟡 Pinjam (Sementara)</option>
-                </select>
+                <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                  📜 Audit Log System (Jejak Aktivitas Staf)
+                </h2>
+                <p className="text-xs text-slate-400 mt-1">
+                  Catatan real-time aksi input, edit, hapus, dan pengembalian barang yang dilakukan pengguna.
+                </p>
               </div>
-            )}
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
-                {activeTab === 'masuk' ? 'Quantity Masuk' : 'Quantity Keluar / Pinjam'}
-              </label>
-              <input
-                type="number"
-                value={formData.qty}
-                onChange={e => setFormData({ ...formData, qty: e.target.value })}
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-slate-200 focus:outline-none focus:border-indigo-500 transition-all text-sm"
-                placeholder="0"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
-                Tanggal
-              </label>
-              <input
-                type="date"
-                value={formData.tanggal}
-                onChange={e => setFormData({ ...formData, tanggal: e.target.value })}
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-slate-200 focus:outline-none focus:border-indigo-500 transition-all text-sm"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
-                Foto Barang (Auto Kompres)
-              </label>
-              <input
-                type="file"
-                accept="image/*"
-                onChange={(e) => handleFileUpload(e, false)}
-                className="w-full text-sm text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-slate-800 file:text-slate-200 hover:file:bg-slate-700 cursor-pointer"
-              />
-              
-              {uploading && <p className="text-xs text-indigo-400 mt-1">Mengompres & Uploading foto...</p>}
-              
-              {fileSizeInfo.original && !uploading && (
-                <div className="mt-2 text-xs flex items-center gap-2 bg-slate-950/80 p-2 rounded-lg border border-slate-800">
-                  <span className="text-slate-400">
-                    Awal: <strong className="text-rose-400">{fileSizeInfo.original}</strong>
-                  </span>
-                  {fileSizeInfo.compressed && (
-                    <>
-                      <span className="text-slate-600">➔</span>
-                      <span className="text-slate-400">
-                        Hasil: <strong className="text-emerald-400">{fileSizeInfo.compressed}</strong>
-                      </span>
-                    </>
-                  )}
-                </div>
-              )}
-            </div>
-
-            <div className="md:col-span-2 lg:col-span-3">
-              <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
-                Keterangan
-              </label>
-              <input
-                type="text"
-                value={formData.ket}
-                onChange={e => setFormData({ ...formData, ket: e.target.value })}
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-slate-200 focus:outline-none focus:border-indigo-500 transition-all text-sm"
-                placeholder={activeTab === 'keluar' && formData.status_keluar === 'Pinjam' ? 'Peminjam, tujuan, estimasi balik, dll' : 'Catatan atau keterangan tambahan'}
-              />
-            </div>
-
-            <div className="md:col-span-2 lg:col-span-3 mt-2">
               <button
-                type="submit"
-                className={`w-full py-3 px-6 rounded-xl font-medium text-white shadow-lg transition-all ${
-                  activeTab === 'masuk'
-                    ? 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-950/50'
-                    : formData.status_keluar === 'Pinjam'
-                    ? 'bg-amber-600 hover:bg-amber-500 shadow-amber-950/50'
-                    : 'bg-rose-600 hover:bg-rose-500 shadow-rose-950/50'
-                }`}
+                onClick={fetchAuditLogs}
+                className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-xl transition-all border border-slate-700"
               >
-                Simpan {activeTab === 'masuk' ? 'Barang Masuk' : formData.status_keluar === 'Pinjam' ? 'Pinjaman Barang' : 'Barang Keluar'}
+                🔄 Refresh Log
               </button>
             </div>
-          </form>
-        </div>
 
-        {/* Tabel Card */}
-        <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-6 backdrop-blur-xl shadow-xl space-y-6">
-          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-            <h2 className="text-xl font-semibold text-slate-200">
-              Riwayat {activeTab === 'masuk' ? 'Barang Masuk' : 'Barang Keluar & Pinjaman'}
-            </h2>
-            
-            <div className="flex flex-wrap items-center gap-3">
-              <button
-                onClick={handleExportExcel}
-                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-xl text-xs flex items-center gap-2 shadow-lg shadow-emerald-950/40 transition-all"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                </svg>
-                Export Excel
-              </button>
-
-              <div className="flex items-center bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5 gap-2 text-xs">
-                <span className="text-slate-400 font-medium">Dari:</span>
-                <input
-                  type="date"
-                  value={startDate}
-                  onChange={e => setStartDate(e.target.value)}
-                  className="bg-transparent text-slate-200 focus:outline-none text-xs"
-                />
-                <span className="text-slate-400 font-medium">S/D:</span>
-                <input
-                  type="date"
-                  value={endDate}
-                  onChange={e => setEndDate(e.target.value)}
-                  className="bg-transparent text-slate-200 focus:outline-none text-xs"
-                />
-                {(startDate || endDate) && (
-                  <button
-                    onClick={handleResetDateRange}
-                    className="text-rose-400 hover:text-rose-300 font-bold ml-1 text-xs"
-                  >
-                    ✕
-                  </button>
-                )}
-              </div>
-
-              <select
-                value={selectedMonth}
-                onChange={e => setSelectedMonth(e.target.value)}
-                className="bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500"
-              >
-                {monthsList.map(m => (
-                  <option key={m.value} value={m.value}>{m.label}</option>
-                ))}
-              </select>
-
-              <input
-                type="text"
-                placeholder="Cari Nama / SN / SJ..."
-                value={search}
-                onChange={e => setSearch(e.target.value)}
-                className="bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500 w-full sm:w-52"
-              />
-            </div>
-          </div>
-
-          {searchedItemName && (
-            <div className="bg-emerald-950/40 border border-emerald-500/30 rounded-xl p-4 flex items-center justify-between">
-              <div>
-                <p className="text-xs text-emerald-400 font-semibold uppercase tracking-wider">Info Total Stok Real-Time</p>
-                <h4 className="text-lg font-bold text-white mt-0.5">Barang: "{searchedItemName}"</h4>
-              </div>
-              <div className="text-right">
-                <span className="text-2xl font-black text-emerald-400">{currentSearchedStock}</span>
-                <span className="text-xs text-slate-400 block">Unit Tersedia di Gudang</span>
-              </div>
-            </div>
-          )}
-
-          <div className="overflow-x-auto rounded-xl border border-slate-800">
-            <table className="w-full text-left text-sm text-slate-300">
-              <thead className="bg-slate-950 text-slate-400 font-semibold uppercase text-xs border-b border-slate-800">
-                <tr>
-                  <th className="py-3.5 px-4">Tipe</th>
-                  <th className="py-3.5 px-4">Asal / SJ</th>
-                  <th className="py-3.5 px-4">SN</th>
-                  <th className="py-3.5 px-4">Nama Barang</th>
-                  <th className="py-3.5 px-4 text-emerald-400">{activeTab === 'masuk' ? 'QTY Masuk' : 'QTY Keluar'}</th>
-                  <th className="py-3.5 px-4">Tanggal</th>
-                  <th className="py-3.5 px-4">Keterangan</th>
-                  <th className="py-3.5 px-4">Foto</th>
-                  <th className="py-3.5 px-4 text-center">Aksi</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-800/60">
-                {loading ? (
+            <div className="overflow-x-auto rounded-xl border border-slate-800">
+              <table className="w-full text-left text-sm text-slate-300">
+                <thead className="bg-slate-950 text-slate-400 font-semibold uppercase text-xs border-b border-slate-800">
                   <tr>
-                    <td colSpan="9" className="text-center py-8 text-slate-500">Memuat data...</td>
+                    <th className="py-3.5 px-4">Waktu (WIB)</th>
+                    <th className="py-3.5 px-4">User / Operator</th>
+                    <th className="py-3.5 px-4">Aksi</th>
+                    <th className="py-3.5 px-4">Detail Perubahan Data</th>
                   </tr>
-                ) : Object.keys(groupedLogs).length === 0 ? (
-                  <tr>
-                    <td colSpan="9" className="text-center py-8 text-slate-500">Belum ada riwayat data</td>
-                  </tr>
-                ) : (
-                  Object.entries(groupedLogs).map(([monthName, items]) => (
-                    <React.Fragment key={monthName}>
-                      <tr className="bg-slate-950/80">
-                        <td colSpan="9" className="py-2.5 px-4 font-bold text-xs uppercase tracking-wider text-emerald-400 border-y border-slate-800/80">
-                          📅 Bulan: {monthName} ({items.length} Transaksi)
+                </thead>
+                <tbody className="divide-y divide-slate-800/60">
+                  {loading ? (
+                    <tr>
+                      <td colSpan="4" className="text-center py-8 text-slate-500">Memuat riwayat audit...</td>
+                    </tr>
+                  ) : auditLogsData.length === 0 ? (
+                    <tr>
+                      <td colSpan="4" className="text-center py-8 text-slate-500">Belum ada riwayat aktivitas tersimpan.</td>
+                    </tr>
+                  ) : (
+                    auditLogsData.map(audit => (
+                      <tr key={audit.id} className="hover:bg-slate-800/40 transition-colors">
+                        <td className="py-3.5 px-4 text-xs font-mono text-slate-400">
+                          {new Date(audit.created_at).toLocaleString('id-ID', {
+                            day: '2-digit',
+                            month: 'short',
+                            year: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                            second: '2-digit'
+                          })} WIB
+                        </td>
+                        <td className="py-3.5 px-4 font-semibold text-indigo-300">
+                          {audit.user_email}
+                        </td>
+                        <td className="py-3.5 px-4">
+                          {audit.action === 'TAMBAH' && (
+                            <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                              🟢 + TAMBAH
+                            </span>
+                          )}
+                          {audit.action === 'EDIT' && (
+                            <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+                              🟣 ✏️ EDIT
+                            </span>
+                          )}
+                          {audit.action === 'HAPUS' && (
+                            <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-rose-500/10 text-rose-400 border border-rose-500/20">
+                              🔴 🗑️ HAPUS
+                            </span>
+                          )}
+                          {audit.action === 'PENGEMBALIAN' && (
+                            <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                              🟡 ↩ BALIK
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-3.5 px-4 text-slate-300 font-mono text-xs">
+                          {audit.detail}
                         </td>
                       </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ) : (
+          /* TAMPILAN UTAMA (BARANG MASUK / KELUAR) */
+          <>
+            {/* Stat Cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="bg-slate-900/70 border border-slate-800 rounded-2xl p-4 flex items-center gap-4 shadow-lg backdrop-blur-xl">
+                <div className="p-3.5 bg-blue-500/10 text-blue-400 rounded-xl border border-blue-500/20 text-2xl">📦</div>
+                <div>
+                  <p className="text-xs text-slate-400 font-semibold uppercase tracking-wider">Total Jenis Barang</p>
+                  <h3 className="text-2xl font-black text-white mt-0.5">{totalJenisBarang} <span className="text-xs font-normal text-slate-400">Items</span></h3>
+                </div>
+              </div>
 
-                      {items.map(log => {
-                        const isPinjam = log.ket?.includes('[DIPINJAM]');
+              <div className="bg-slate-900/70 border border-slate-800 rounded-2xl p-4 flex items-center gap-4 shadow-lg backdrop-blur-xl">
+                <div className="p-3.5 bg-emerald-500/10 text-emerald-400 rounded-xl border border-emerald-500/20 text-2xl">📥</div>
+                <div>
+                  <p className="text-xs text-slate-400 font-semibold uppercase tracking-wider">Masuk (Bulan Ini)</p>
+                  <h3 className="text-2xl font-black text-emerald-400 mt-0.5">+{totalMasukBulanIni} <span className="text-xs font-normal text-slate-400">Unit</span></h3>
+                </div>
+              </div>
 
-                        return (
-                          <tr key={log.id} className="hover:bg-slate-800/40 transition-colors">
-                            <td className="py-3 px-4">
-                              {log.tipe === 'Barang Masuk' ? (
-                                <span className="inline-block px-2.5 py-1 rounded-full text-xs font-bold whitespace-nowrap bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                                  Barang Masuk
-                                </span>
-                              ) : isPinjam ? (
-                                <span className="inline-block px-2.5 py-1 rounded-full text-xs font-bold whitespace-nowrap bg-amber-500/10 text-amber-400 border border-amber-500/20">
-                                  🟡 Pinjam
-                                </span>
-                              ) : (
-                                <span className="inline-block px-2.5 py-1 rounded-full text-xs font-bold whitespace-nowrap bg-rose-500/10 text-rose-400 border border-rose-500/20">
-                                  🔴 Barang Keluar
-                                </span>
-                              )}
-                            </td>
-                            <td className="py-3 px-4">{log.asal || '-'}</td>
-                            <td className="py-3 px-4 font-mono text-slate-400">{log.sn || '-'}</td>
-                            <td className="py-3 px-4 font-semibold text-white">{log.nama || '-'}</td>
-                            <td className="py-3 px-4 font-bold text-emerald-400">{log.qty || 0} Unit</td>
-                            
-                            <td className="py-3 px-4">
-                              <div className="text-slate-300 font-medium">{log.tanggal}</div>
-                              {log.created_at && (
-                                <div className="text-[10px] text-slate-500 flex items-center gap-1 mt-0.5">
-                                  <span>🕒</span>
-                                  <span>
-                                    {new Date(log.created_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })} WIB
-                                  </span>
-                                </div>
-                              )}
-                            </td>
+              <div className="bg-slate-900/70 border border-slate-800 rounded-2xl p-4 flex items-center gap-4 shadow-lg backdrop-blur-xl">
+                <div className="p-3.5 bg-rose-500/10 text-rose-400 rounded-xl border border-rose-500/20 text-2xl">📤</div>
+                <div>
+                  <p className="text-xs text-slate-400 font-semibold uppercase tracking-wider">Keluar (Bulan Ini)</p>
+                  <h3 className="text-2xl font-black text-rose-400 mt-0.5">-{totalKeluarBulanIni} <span className="text-xs font-normal text-slate-400">Unit</span></h3>
+                </div>
+              </div>
 
-                            <td className="py-3 px-4 text-slate-400">{log.ket || '-'}</td>
-                            <td className="py-3 px-4">
-                              {log.foto_url ? (
-                                <a href={log.foto_url} target="_blank" rel="noreferrer">
-                                  <img src={log.foto_url} alt="Foto" className="w-10 h-10 object-cover rounded-lg border border-slate-700 hover:scale-110 transition-transform" />
-                                </a>
-                              ) : (
-                                <span className="text-xs text-slate-600">Tidak ada</span>
-                              )}
-                            </td>
-                            
-                            <td className="py-3 px-4 text-center flex items-center justify-center gap-1.5">
-                              {isPinjam && (
-                                <button
-                                  onClick={() => openReturnModal(log)}
-                                  className="px-2.5 py-1.5 bg-amber-500/10 hover:bg-amber-500 text-amber-400 hover:text-white rounded-lg text-xs font-medium border border-amber-500/20 transition-all"
-                                  title="Kembalikan Stok Barang Pinjaman"
-                                >
-                                  ↩ Balik
-                                </button>
-                              )}
+              <div className="bg-slate-900/70 border border-slate-800 rounded-2xl p-4 flex items-center gap-4 shadow-lg backdrop-blur-xl">
+                <div className="p-3.5 bg-amber-500/10 text-amber-400 rounded-xl border border-amber-500/20 text-2xl">🔄</div>
+                <div>
+                  <p className="text-xs text-slate-400 font-semibold uppercase tracking-wider">Sedang Dipinjam</p>
+                  <h3 className="text-2xl font-black text-amber-400 mt-0.5">{sisaSedangDipinjam} <span className="text-xs font-normal text-slate-400">Unit</span></h3>
+                </div>
+              </div>
+            </div>
 
-                              {/* TOMBOL EDIT DATA BARU */}
-                              <button
-                                onClick={() => openEditModal(log)}
-                                className="px-2.5 py-1.5 bg-indigo-500/10 hover:bg-indigo-600 text-indigo-400 hover:text-white rounded-lg text-xs font-medium border border-indigo-500/20 transition-all"
-                                title="Edit Transaksi Ini"
-                              >
-                                ✏️ Edit
-                              </button>
+            {/* Form Card */}
+            <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-6 backdrop-blur-xl shadow-xl">
+              <h2 className="text-xl font-semibold mb-6 text-slate-200 flex items-center gap-2">
+                <span className={`w-3 h-3 rounded-full ${activeTab === 'masuk' ? 'bg-emerald-500' : 'bg-rose-500'}`}></span>
+                Input khusus {activeTab === 'masuk' ? 'Barang Masuk' : 'Barang Keluar'}
+              </h2>
 
-                              <button
-                                onClick={() => handlePrintPDF(log)}
-                                className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg text-xs font-medium border border-slate-700 transition-all"
-                                title="Cetak Bukti PDF"
-                              >
-                                🖨️ PDF
-                              </button>
+              <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
+                    Surat Jalan / Asal
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.asal}
+                    onChange={e => setFormData({ ...formData, asal: e.target.value })}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-slate-200 focus:outline-none focus:border-indigo-500 transition-all text-sm"
+                    placeholder="Contoh: SJ-001 / Vendor A"
+                  />
+                </div>
 
-                              <button
-                                onClick={() => handleDelete(log.id)}
-                                className="px-2.5 py-1.5 bg-rose-500/10 hover:bg-rose-500 text-rose-400 hover:text-white rounded-lg text-xs font-medium border border-rose-500/20 transition-all"
-                              >
-                                Hapus
-                              </button>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
+                    Serial Number (SN)
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.sn}
+                    onChange={e => setFormData({ ...formData, sn: e.target.value })}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-slate-200 focus:outline-none focus:border-indigo-500 transition-all text-sm"
+                    placeholder="SN12345678"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
+                    Nama Barang
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.nama}
+                    onChange={e => setFormData({ ...formData, nama: e.target.value })}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-slate-200 focus:outline-none focus:border-indigo-500 transition-all text-sm"
+                    placeholder="Masukkan nama barang"
+                  />
+                </div>
+
+                {activeTab === 'keluar' && (
+                  <div>
+                    <label className="block text-xs font-semibold text-amber-400 uppercase tracking-wider mb-2">
+                      Status Transaksi Keluar
+                    </label>
+                    <select
+                      value={formData.status_keluar}
+                      onChange={e => setFormData({ ...formData, status_keluar: e.target.value })}
+                      className="w-full bg-slate-950 border border-amber-500/40 rounded-xl px-4 py-2.5 text-amber-300 focus:outline-none focus:border-amber-500 transition-all text-sm font-semibold"
+                    >
+                      <option value="Keluar Permanen">🔴 Keluar Permanen (Dijual/Pakai)</option>
+                      <option value="Pinjam">🟡 Pinjam (Sementara)</option>
+                    </select>
+                  </div>
+                )}
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
+                    {activeTab === 'masuk' ? 'Quantity Masuk' : 'Quantity Keluar / Pinjam'}
+                  </label>
+                  <input
+                    type="number"
+                    value={formData.qty}
+                    onChange={e => setFormData({ ...formData, qty: e.target.value })}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-slate-200 focus:outline-none focus:border-indigo-500 transition-all text-sm"
+                    placeholder="0"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
+                    Tanggal
+                  </label>
+                  <input
+                    type="date"
+                    value={formData.tanggal}
+                    onChange={e => setFormData({ ...formData, tanggal: e.target.value })}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-slate-200 focus:outline-none focus:border-indigo-500 transition-all text-sm"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
+                    Foto Barang (Auto Kompres)
+                  </label>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={(e) => handleFileUpload(e, false)}
+                    className="w-full text-sm text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-slate-800 file:text-slate-200 hover:file:bg-slate-700 cursor-pointer"
+                  />
+                  
+                  {uploading && <p className="text-xs text-indigo-400 mt-1">Mengompres & Uploading foto...</p>}
+                  
+                  {fileSizeInfo.original && !uploading && (
+                    <div className="mt-2 text-xs flex items-center gap-2 bg-slate-950/80 p-2 rounded-lg border border-slate-800">
+                      <span className="text-slate-400">
+                        Awal: <strong className="text-rose-400">{fileSizeInfo.original}</strong>
+                      </span>
+                      {fileSizeInfo.compressed && (
+                        <>
+                          <span className="text-slate-600">➔</span>
+                          <span className="text-slate-400">
+                            Hasil: <strong className="text-emerald-400">{fileSizeInfo.compressed}</strong>
+                          </span>
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                <div className="md:col-span-2 lg:col-span-3">
+                  <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
+                    Keterangan
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.ket}
+                    onChange={e => setFormData({ ...formData, ket: e.target.value })}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-slate-200 focus:outline-none focus:border-indigo-500 transition-all text-sm"
+                    placeholder={activeTab === 'keluar' && formData.status_keluar === 'Pinjam' ? 'Peminjam, tujuan, estimasi balik, dll' : 'Catatan atau keterangan tambahan'}
+                  />
+                </div>
+
+                <div className="md:col-span-2 lg:col-span-3 mt-2">
+                  <button
+                    type="submit"
+                    className={`w-full py-3 px-6 rounded-xl font-medium text-white shadow-lg transition-all ${
+                      activeTab === 'masuk'
+                        ? 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-950/50'
+                        : formData.status_keluar === 'Pinjam'
+                        ? 'bg-amber-600 hover:bg-amber-500 shadow-amber-950/50'
+                        : 'bg-rose-600 hover:bg-rose-500 shadow-rose-950/50'
+                    }`}
+                  >
+                    Simpan {activeTab === 'masuk' ? 'Barang Masuk' : formData.status_keluar === 'Pinjam' ? 'Pinjaman Barang' : 'Barang Keluar'}
+                  </button>
+                </div>
+              </form>
+            </div>
+
+            {/* Tabel Card */}
+            <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-6 backdrop-blur-xl shadow-xl space-y-6">
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                <h2 className="text-xl font-semibold text-slate-200">
+                  Riwayat {activeTab === 'masuk' ? 'Barang Masuk' : 'Barang Keluar & Pinjaman'}
+                </h2>
+                
+                <div className="flex flex-wrap items-center gap-3">
+                  {activeTab === 'keluar' && (
+                    <button
+                      onClick={() => setOnlyPinjam(!onlyPinjam)}
+                      className={`px-3 py-2 rounded-xl text-xs font-semibold border transition-all flex items-center gap-1.5 ${
+                        onlyPinjam 
+                          ? 'bg-amber-500 text-slate-950 border-amber-400 font-bold shadow-lg shadow-amber-950/50' 
+                          : 'bg-slate-950 text-amber-400 border-amber-500/30 hover:border-amber-500'
+                      }`}
+                    >
+                      <span>🟡</span>
+                      <span>{onlyPinjam ? 'Tampilkan Semua' : 'Hanya Dipinjam'}</span>
+                    </button>
+                  )}
+
+                  <button
+                    onClick={handleExportExcel}
+                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-xl text-xs flex items-center gap-2 shadow-lg shadow-emerald-950/40 transition-all"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                    Export Excel
+                  </button>
+
+                  <div className="flex items-center bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5 gap-2 text-xs">
+                    <span className="text-slate-400 font-medium">Dari:</span>
+                    <input
+                      type="date"
+                      value={startDate}
+                      onChange={e => setStartDate(e.target.value)}
+                      className="bg-transparent text-slate-200 focus:outline-none text-xs"
+                    />
+                    <span className="text-slate-400 font-medium">S/D:</span>
+                    <input
+                      type="date"
+                      value={endDate}
+                      onChange={e => setEndDate(e.target.value)}
+                      className="bg-transparent text-slate-200 focus:outline-none text-xs"
+                    />
+                    {(startDate || endDate) && (
+                      <button
+                        onClick={handleResetDateRange}
+                        className="text-rose-400 hover:text-rose-300 font-bold ml-1 text-xs"
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+
+                  <select
+                    value={selectedMonth}
+                    onChange={e => setSelectedMonth(e.target.value)}
+                    className="bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500"
+                  >
+                    {monthsList.map(m => (
+                      <option key={m.value} value={m.value}>{m.label}</option>
+                    ))}
+                  </select>
+
+                  <input
+                    type="text"
+                    placeholder="Cari Nama / SN / SJ..."
+                    value={search}
+                    onChange={e => setSearch(e.target.value)}
+                    className="bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500 w-full sm:w-52"
+                  />
+                </div>
+              </div>
+
+              {searchedItemName && (
+                <div className="bg-emerald-950/40 border border-emerald-500/30 rounded-xl p-4 flex items-center justify-between">
+                  <div>
+                    <p className="text-xs text-emerald-400 font-semibold uppercase tracking-wider">Info Total Stok Real-Time</p>
+                    <h4 className="text-lg font-bold text-white mt-0.5">Barang: "{searchedItemName}"</h4>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-2xl font-black text-emerald-400">{currentSearchedStock}</span>
+                    <span className="text-xs text-slate-400 block">Unit Tersedia di Gudang</span>
+                  </div>
+                </div>
+              )}
+
+              <div className="overflow-x-auto rounded-xl border border-slate-800">
+                <table className="w-full text-left text-sm text-slate-300">
+                  <thead className="bg-slate-950 text-slate-400 font-semibold uppercase text-xs border-b border-slate-800">
+                    <tr>
+                      <th className="py-3.5 px-4">Tipe</th>
+                      <th className="py-3.5 px-4">Asal / SJ</th>
+                      <th className="py-3.5 px-4">SN</th>
+                      <th className="py-3.5 px-4">Nama Barang</th>
+                      <th className="py-3.5 px-4 text-emerald-400">{activeTab === 'masuk' ? 'QTY Masuk' : 'QTY Keluar'}</th>
+                      <th className="py-3.5 px-4">Tanggal</th>
+                      <th className="py-3.5 px-4">Keterangan</th>
+                      <th className="py-3.5 px-4">Foto</th>
+                      <th className="py-3.5 px-4 text-center">Aksi</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/60">
+                    {loading ? (
+                      <tr>
+                        <td colSpan="9" className="text-center py-8 text-slate-500">Memuat data...</td>
+                      </tr>
+                    ) : Object.keys(groupedLogs).length === 0 ? (
+                      <tr>
+                        <td colSpan="9" className="text-center py-8 text-slate-500">Belum ada riwayat data</td>
+                      </tr>
+                    ) : (
+                      Object.entries(groupedLogs).map(([monthName, items]) => (
+                        <React.Fragment key={monthName}>
+                          <tr className="bg-slate-950/80">
+                            <td colSpan="9" className="py-2.5 px-4 font-bold text-xs uppercase tracking-wider text-emerald-400 border-y border-slate-800/80">
+                              📅 Bulan: {monthName} ({items.length} Transaksi)
                             </td>
                           </tr>
-                        );
-                      })}
-                    </React.Fragment>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
+
+                          {items.map(log => {
+                            const isPinjam = log.ket?.includes('[DIPINJAM]');
+
+                            return (
+                              <tr key={log.id} className="hover:bg-slate-800/40 transition-colors">
+                                <td className="py-3 px-4">
+                                  {log.tipe === 'Barang Masuk' ? (
+                                    <span className="inline-block px-2.5 py-1 rounded-full text-xs font-bold whitespace-nowrap bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                                      Barang Masuk
+                                    </span>
+                                  ) : isPinjam ? (
+                                    <span className="inline-block px-2.5 py-1 rounded-full text-xs font-bold whitespace-nowrap bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                                      🟡 Pinjam
+                                    </span>
+                                  ) : (
+                                    <span className="inline-block px-2.5 py-1 rounded-full text-xs font-bold whitespace-nowrap bg-rose-500/10 text-rose-400 border border-rose-500/20">
+                                      🔴 Barang Keluar
+                                    </span>
+                                  )}
+                                </td>
+                                <td className="py-3 px-4">{log.asal || '-'}</td>
+                                <td className="py-3 px-4 font-mono text-slate-400">{log.sn || '-'}</td>
+                                <td className="py-3 px-4 font-semibold text-white">{log.nama || '-'}</td>
+                                <td className="py-3 px-4 font-bold text-emerald-400">{log.qty || 0} Unit</td>
+                                
+                                <td className="py-3 px-4">
+                                  <div className="text-slate-300 font-medium">{log.tanggal}</div>
+                                  {log.created_at && (
+                                    <div className="text-[10px] text-slate-500 flex items-center gap-1 mt-0.5">
+                                      <span>🕒</span>
+                                      <span>
+                                        {new Date(log.created_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })} WIB
+                                      </span>
+                                    </div>
+                                  )}
+                                </td>
+
+                                <td className="py-3 px-4 text-slate-400">{log.ket || '-'}</td>
+                                <td className="py-3 px-4">
+                                  {log.foto_url ? (
+                                    <a href={log.foto_url} target="_blank" rel="noreferrer">
+                                      <img src={log.foto_url} alt="Foto" className="w-10 h-10 object-cover rounded-lg border border-slate-700 hover:scale-110 transition-transform" />
+                                    </a>
+                                  ) : (
+                                    <span className="text-xs text-slate-600">Tidak ada</span>
+                                  )}
+                                </td>
+                                
+                                <td className="py-3 px-4 text-center flex items-center justify-center gap-1.5">
+                                  {isPinjam && (
+                                    <button
+                                      onClick={() => openReturnModal(log)}
+                                      className="px-2.5 py-1.5 bg-amber-500/10 hover:bg-amber-500 text-amber-400 hover:text-white rounded-lg text-xs font-medium border border-amber-500/20 transition-all"
+                                      title="Kembalikan Stok Barang Pinjaman"
+                                    >
+                                      ↩ Balik
+                                    </button>
+                                  )}
+
+                                  <button
+                                    onClick={() => openEditModal(log)}
+                                    className="px-2.5 py-1.5 bg-indigo-500/10 hover:bg-indigo-600 text-indigo-400 hover:text-white rounded-lg text-xs font-medium border border-indigo-500/20 transition-all"
+                                    title="Edit Transaksi Ini"
+                                  >
+                                    ✏️ Edit
+                                  </button>
+
+                                  <button
+                                    onClick={() => handlePrintPDF(log)}
+                                    className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg text-xs font-medium border border-slate-700 transition-all"
+                                    title="Cetak Bukti PDF"
+                                  >
+                                    🖨️ PDF
+                                  </button>
+
+                                  <button
+                                    onClick={() => handleDelete(log)}
+                                    className="px-2.5 py-1.5 bg-rose-500/10 hover:bg-rose-500 text-rose-400 hover:text-white rounded-lg text-xs font-medium border border-rose-500/20 transition-all"
+                                  >
+                                    Hapus
+                                  </button>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </React.Fragment>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </>
+        )}
 
       </div>
 
