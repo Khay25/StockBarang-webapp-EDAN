@@ -15,11 +15,13 @@ export default function App() {
   const location = useLocation();
   const navigate = useNavigate();
 
-  // Tab active: 'masuk', 'keluar', atau 'audit'
+  // Tab active: 'masuk', 'keluar', 'audit', atau 'maqna'
   const activeTab = location.pathname === '/keluar' 
     ? 'keluar' 
     : location.pathname === '/audit' 
     ? 'audit' 
+    : location.pathname === '/maqna'
+    ? 'maqna'
     : 'masuk';
 
   const [logs, setLogs] = useState([]);
@@ -159,11 +161,13 @@ export default function App() {
         ? 'Halaman Barang Masuk - EDAN' 
         : activeTab === 'keluar'
         ? 'Halaman Barang Keluar - EDAN'
+        : activeTab === 'maqna'
+        ? 'Stock Barang Maqna - EDAN'
         : 'Audit Log System - EDAN';
 
       if (activeTab === 'audit') {
         fetchAuditLogs();
-      } else {
+      } else if (activeTab === 'masuk' || activeTab === 'keluar') {
         fetchLogs();
       }
       fetchAllLogsForStock();
@@ -652,9 +656,17 @@ export default function App() {
                     ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' 
                     : activeTab === 'keluar'
                     ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
+                    : activeTab === 'maqna'
+                    ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20'
                     : 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20'
                 }`}>
-                  {activeTab === 'masuk' ? 'Barang Masuk' : activeTab === 'keluar' ? 'Barang Keluar' : '📜 Audit Log'}
+                  {activeTab === 'masuk'
+                    ? 'Barang Masuk'
+                    : activeTab === 'keluar'
+                    ? 'Barang Keluar'
+                    : activeTab === 'maqna'
+                    ? '📦 Stock Barang Maqna'
+                    : '📜 Audit Log'}
                 </span>
               </p>
             </div>
@@ -662,7 +674,7 @@ export default function App() {
 
           <div className="flex items-center gap-3">
             {userRole === 'admin' && (
-              <div className="flex bg-slate-900 p-1.5 rounded-2xl border border-slate-800 gap-1">
+              <div className="flex flex-wrap bg-slate-900 p-1.5 rounded-2xl border border-slate-800 gap-1">
                 <button
                   onClick={() => navigate('/masuk')}
                   className={`px-4 py-2 text-xs font-semibold rounded-xl transition-all flex items-center gap-2 ${
@@ -695,6 +707,17 @@ export default function App() {
                 >
                   📜 Audit Log
                 </button>
+                <button
+                  onClick={() => navigate('/maqna')}
+                  className={`px-4 py-2 text-xs font-semibold rounded-xl transition-all flex items-center gap-2 ${
+                    activeTab === 'maqna'
+                      ? 'bg-cyan-600 text-white shadow-lg shadow-cyan-900/40'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <span className="w-2 h-2 rounded-full bg-cyan-400"></span>
+                  Stock Barang Maqna
+                </button>
               </div>
             )}
 
@@ -707,8 +730,10 @@ export default function App() {
           </div>
         </div>
 
-        {/* TAMPILAN KHUSUS TAB AUDIT LOG (ADMIN ONLY) */}
-        {activeTab === 'audit' ? (
+        {/* TAMPILAN KHUSUS TAB STOCK BARANG MAQNA & AUDIT LOG */}
+        {activeTab === 'maqna' ? (
+          <StockMaqna transaksi={allLogs} />
+        ) : activeTab === 'audit' ? (
           <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-6 backdrop-blur-xl shadow-xl space-y-6">
             <div className="flex justify-between items-center">
               <div>

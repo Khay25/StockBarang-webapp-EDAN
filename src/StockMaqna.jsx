@@ -6,13 +6,11 @@ export default function StockMaqna({
   barangKeluar = [],
 }) {
   const [search, setSearch] = useState('');
-  const [filterStok, setFilterStok] = useState('semua'); // 'semua' | 'tersedia' | 'habis'
+  const [filterStok, setFilterStok] = useState('semua');
 
-  // Gabungkan & hitung otomatis stok real-time dari Barang Masuk & Barang Keluar
   const stokMaqna = useMemo(() => {
     const mapBarang = new Map();
 
-    // Normalisasi sumber data (mendukung 1 array gabungan maupun 2 array terpisah)
     const semuaTransaksi = [
       ...transaksi.map((item) => ({
         ...item,
@@ -24,10 +22,10 @@ export default function StockMaqna({
       })),
       ...barangMasuk.map((item) => ({ ...item, _arah: 'masuk' })),
       ...barangKeluar.map((item) => ({ ...item, _arah: 'keluar' })),
-    ];
+    ].sort((a, b) => new Date(a.tanggal || 0) - new Date(b.tanggal || 0));
 
     semuaTransaksi.forEach((item) => {
-      const nama = (item.nama_barang || item.nama || item.item_name || '-').trim();
+      const nama = (item.nama || item.nama_barang || item.item_name || '-').trim();
       const tipeBarang = (
         item.tipe_barang ||
         item.kategori ||
@@ -37,9 +35,8 @@ export default function StockMaqna({
       ).trim();
       const sn = (item.sn || item.serial_number || '-').trim();
       const qty = Number(item.qty ?? item.jumlah ?? item.quantity ?? 0) || 0;
-      const ket = (item.keterangan || item.catatan || item.notes || '').trim();
+      const ket = (item.ket || item.keterangan || item.catatan || item.notes || '').trim();
 
-      // Kelompokkan berdasarkan SN jika ada, atau kombinasi Nama + Tipe Barang
       const key =
         sn && sn !== '-'
           ? `SN-${sn.toLowerCase()}`
@@ -64,7 +61,6 @@ export default function StockMaqna({
         existing.qty -= qty;
       }
 
-      // Update tipe & keterangan jika transaksi terbaru punya info lebih lengkap
       if (tipeBarang && tipeBarang !== '-') existing.tipe_barang = tipeBarang;
       if (ket) existing.keterangan = ket;
     });
@@ -72,7 +68,6 @@ export default function StockMaqna({
     return Array.from(mapBarang.values());
   }, [transaksi, barangMasuk, barangKeluar]);
 
-  // Filter pencarian & status stok
   const filteredData = useMemo(() => {
     return stokMaqna.filter((row) => {
       const keyword = search.toLowerCase();
@@ -94,7 +89,6 @@ export default function StockMaqna({
     [stokMaqna]
   );
 
-  // Export ke CSV / Excel
   const handleExportCSV = () => {
     const headers = ['Nama Barang', 'Tipe Barang', 'SN', 'Qty', 'Keterangan'];
     const rows = filteredData.map((r) => [
@@ -121,20 +115,19 @@ export default function StockMaqna({
   };
 
   return (
-    <div className="bg-[#0f172a] border border-slate-800/80 rounded-2xl p-6 shadow-xl text-slate-100">
-      {/* Header & Controls */}
-      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 mb-6">
+    <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-6 backdrop-blur-xl shadow-xl space-y-6">
+      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
         <div>
           <div className="flex items-center gap-3">
             <h2 className="text-xl font-bold text-white tracking-tight">
-              Stock Barang Maqna
+              📦 Stock Barang Maqna
             </h2>
-            <span className="px-2.5 py-0.5 text-xs font-semibold rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+            <span className="px-2.5 py-0.5 text-xs font-bold rounded-full bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
               {stokMaqna.length} Jenis • {totalUnit} Unit Tersedia
             </span>
           </div>
           <p className="text-xs text-slate-400 mt-1">
-            Otomatis sinkron dari setiap input, edit, atau hapus pada Barang Masuk &amp; Barang Keluar
+            Otomatis sinkron dari setiap input, edit, atau hapus pada Barang Masuk &amp; Barang Keluar.
           </p>
         </div>
 
@@ -142,18 +135,15 @@ export default function StockMaqna({
           <button
             type="button"
             onClick={handleExportCSV}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[#10b981] hover:bg-[#059669] text-white text-xs font-semibold transition cursor-pointer"
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold transition-all cursor-pointer"
           >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5m0 0l5-5m-5 5V3" />
-            </svg>
             Export Excel
           </button>
 
           <select
             value={filterStok}
             onChange={(e) => setFilterStok(e.target.value)}
-            className="px-3 py-2 rounded-lg bg-[#0b1120] border border-slate-700/80 text-xs text-slate-200 focus:outline-none focus:border-emerald-500"
+            className="px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-cyan-500"
           >
             <option value="semua">Semua Stok</option>
             <option value="tersedia">Tersedia (&gt; 0)</option>
@@ -165,16 +155,15 @@ export default function StockMaqna({
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Cari Nama / Tipe / SN..."
-            className="px-3.5 py-2 rounded-lg bg-[#0b1120] border border-slate-700/80 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-emerald-500 w-56"
+            className="px-3.5 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-cyan-500 w-56"
           />
         </div>
       </div>
 
-      {/* Tabel 5 Kolom Sesuai Request */}
-      <div className="overflow-x-auto rounded-xl border border-slate-800/80">
-        <table className="w-full text-left border-collapse">
-          <thead>
-            <tr className="bg-[#0b1120] border-b border-slate-800 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+      <div className="overflow-x-auto rounded-xl border border-slate-800">
+        <table className="w-full text-left text-sm text-slate-300">
+          <thead className="bg-slate-950 text-slate-400 font-semibold uppercase text-xs border-b border-slate-800">
+            <tr>
               <th className="py-3.5 px-4">Nama Barang</th>
               <th className="py-3.5 px-4">Tipe Barang</th>
               <th className="py-3.5 px-4">SN</th>
@@ -182,24 +171,21 @@ export default function StockMaqna({
               <th className="py-3.5 px-4">Keterangan</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-800/60 text-sm">
+          <tbody className="divide-y divide-slate-800/60">
             {filteredData.length === 0 ? (
               <tr>
-                <td colSpan={5} className="py-10 text-center text-slate-500 text-xs">
+                <td colSpan="5" className="text-center py-8 text-slate-500 text-xs">
                   Belum ada data stok barang Maqna yang cocok.
                 </td>
               </tr>
             ) : (
               filteredData.map((item) => (
-                <tr
-                  key={item.id}
-                  className="hover:bg-slate-800/40 transition-colors"
-                >
+                <tr key={item.id} className="hover:bg-slate-800/40 transition-colors">
                   <td className="py-3.5 px-4 font-semibold text-white">
                     {item.nama_barang}
                   </td>
-                  <td className="py-3.5 px-4 text-slate-300">
-                    <span className="px-2.5 py-1 rounded-md bg-slate-800/90 border border-slate-700/70 text-xs">
+                  <td className="py-3.5 px-4">
+                    <span className="px-2.5 py-1 rounded-md bg-slate-800 border border-slate-700 text-xs text-slate-200">
                       {item.tipe_barang}
                     </span>
                   </td>
@@ -208,16 +194,16 @@ export default function StockMaqna({
                   </td>
                   <td className="py-3.5 px-4">
                     <span
-                      className={`inline-flex items-center px-2.5 py-1 rounded-md text-xs font-bold ${
+                      className={`px-2.5 py-1 rounded-full text-xs font-bold ${
                         item.qty > 0
-                          ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
-                          : 'bg-rose-500/15 text-rose-400 border border-rose-500/30'
+                          ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                          : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
                       }`}
                     >
                       {item.qty} Unit
                     </span>
                   </td>
-                  <td className="py-3.5 px-4 text-slate-300 text-xs">
+                  <td className="py-3.5 px-4 text-xs text-slate-300">
                     {item.keterangan}
                   </td>
                 </tr>
