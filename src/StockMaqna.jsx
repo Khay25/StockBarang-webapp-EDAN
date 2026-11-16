@@ -7,6 +7,7 @@ export default function StockMaqna({
   barangKeluar = [],
   onRefresh,
   onRecordAudit,
+  isReadOnly = false,
 }) {
   const [search, setSearch] = useState('');
   const [filterStok, setFilterStok] = useState('semua');
@@ -22,6 +23,7 @@ export default function StockMaqna({
 
   const handleManualSubmit = async (e) => {
     e.preventDefault();
+    if (isReadOnly) return;
     if (!manualForm.nama.trim() || !manualForm.qty) {
       alert('Nama Barang dan Qty wajib diisi!');
       return;
@@ -186,97 +188,99 @@ export default function StockMaqna({
 
   return (
     <div className="space-y-6">
-      {/* Form Input Manual 1 per 1 */}
-      <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-6 backdrop-blur-xl shadow-xl">
-        <h2 className="text-lg font-semibold mb-4 text-slate-200 flex items-center gap-2">
-          <span className="w-3 h-3 rounded-full bg-cyan-500"></span>
-          Input Manual Stock Barang Maqna
-        </h2>
+      {/* Form Input Manual 1 per 1 (Otomatis hilang jika akun viewer) */}
+      {!isReadOnly && (
+        <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-6 backdrop-blur-xl shadow-xl">
+          <h2 className="text-lg font-semibold mb-4 text-slate-200 flex items-center gap-2">
+            <span className="w-3 h-3 rounded-full bg-cyan-500"></span>
+            Input Manual Stock Barang Maqna
+          </h2>
 
-        <form onSubmit={handleManualSubmit} className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div>
-              <label className="block text-xs font-semibold text-slate-400 uppercase mb-1.5">
-                Nama Barang *
-              </label>
-              <input
-                type="text"
-                required
-                value={manualForm.nama}
-                onChange={(e) => setManualForm({ ...manualForm, nama: e.target.value })}
-                placeholder="Contoh: USG / Patient Monitor"
-                className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-cyan-500"
-              />
+          <form onSubmit={handleManualSubmit} className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-400 uppercase mb-1.5">
+                  Nama Barang *
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={manualForm.nama}
+                  onChange={(e) => setManualForm({ ...manualForm, nama: e.target.value })}
+                  placeholder="Contoh: USG / Patient Monitor"
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-cyan-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-400 uppercase mb-1.5">
+                  Tipe Barang
+                </label>
+                <input
+                  type="text"
+                  value={manualForm.tipe_barang}
+                  onChange={(e) =>
+                    setManualForm({ ...manualForm, tipe_barang: e.target.value })
+                  }
+                  placeholder="Contoh: Acclarix LX8 / X5"
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-cyan-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-400 uppercase mb-1.5">
+                  Serial Number (SN)
+                </label>
+                <input
+                  type="text"
+                  value={manualForm.sn}
+                  onChange={(e) => setManualForm({ ...manualForm, sn: e.target.value })}
+                  placeholder="Contoh: SN12345678"
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-cyan-500"
+                />
+              </div>
             </div>
 
-            <div>
-              <label className="block text-xs font-semibold text-slate-400 uppercase mb-1.5">
-                Tipe Barang
-              </label>
-              <input
-                type="text"
-                value={manualForm.tipe_barang}
-                onChange={(e) =>
-                  setManualForm({ ...manualForm, tipe_barang: e.target.value })
-                }
-                placeholder="Contoh: Acclarix LX8 / X5"
-                className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-cyan-500"
-              />
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-400 uppercase mb-1.5">
+                  Quantity (Qty) *
+                </label>
+                <input
+                  type="number"
+                  required
+                  min="1"
+                  value={manualForm.qty}
+                  onChange={(e) => setManualForm({ ...manualForm, qty: e.target.value })}
+                  placeholder="0"
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-cyan-500"
+                />
+              </div>
+
+              <div className="md:col-span-2">
+                <label className="block text-xs font-semibold text-slate-400 uppercase mb-1.5">
+                  Keterangan
+                </label>
+                <input
+                  type="text"
+                  value={manualForm.ket}
+                  onChange={(e) => setManualForm({ ...manualForm, ket: e.target.value })}
+                  placeholder="Catatan atau keterangan tambahan"
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-cyan-500"
+                />
+              </div>
             </div>
 
-            <div>
-              <label className="block text-xs font-semibold text-slate-400 uppercase mb-1.5">
-                Serial Number (SN)
-              </label>
-              <input
-                type="text"
-                value={manualForm.sn}
-                onChange={(e) => setManualForm({ ...manualForm, sn: e.target.value })}
-                placeholder="Contoh: SN12345678"
-                className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-cyan-500"
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div>
-              <label className="block text-xs font-semibold text-slate-400 uppercase mb-1.5">
-                Quantity (Qty) *
-              </label>
-              <input
-                type="number"
-                required
-                min="1"
-                value={manualForm.qty}
-                onChange={(e) => setManualForm({ ...manualForm, qty: e.target.value })}
-                placeholder="0"
-                className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-cyan-500"
-              />
-            </div>
-
-            <div className="md:col-span-2">
-              <label className="block text-xs font-semibold text-slate-400 uppercase mb-1.5">
-                Keterangan
-              </label>
-              <input
-                type="text"
-                value={manualForm.ket}
-                onChange={(e) => setManualForm({ ...manualForm, ket: e.target.value })}
-                placeholder="Catatan atau keterangan tambahan"
-                className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-cyan-500"
-              />
-            </div>
-          </div>
-
-          <button
-            type="submit"
-            disabled={saving}
-            className="w-full py-3 rounded-xl bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-white font-semibold text-sm shadow-lg shadow-cyan-900/30 transition-all cursor-pointer"
-          >
-            {saving ? 'Menyimpan...' : '+ Tambah Stock Maqna'}
-          </button>
-        </form>
-      </div>
+            <button
+              type="submit"
+              disabled={saving}
+              className="w-full py-3 rounded-xl bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-white font-semibold text-sm shadow-lg shadow-cyan-900/30 transition-all cursor-pointer"
+            >
+              {saving ? 'Menyimpan...' : '+ Tambah Stock Maqna'}
+            </button>
+          </form>
+        </div>
+      )}
 
       {/* Tabel Rekap 5 Kolom */}
       <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-6 backdrop-blur-xl shadow-xl space-y-6">

@@ -732,7 +732,11 @@ export default function App() {
 
         {/* TAMPILAN KHUSUS TAB STOCK BARANG MAQNA & AUDIT LOG */}
         {activeTab === 'maqna' ? (
-          <StockMaqna transaksi={allLogs} />
+          <StockMaqna
+            transaksi={allLogs}
+            onRefresh={fetchAllLogsForStock}
+            onRecordAudit={recordAudit}
+          />
         ) : activeTab === 'audit' ? (
           <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-6 backdrop-blur-xl shadow-xl space-y-6">
             <div className="flex justify-between items-center">
@@ -858,152 +862,155 @@ export default function App() {
             </div>
 
             {/* Form Card */}
-            <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-6 backdrop-blur-xl shadow-xl">
-              <h2 className="text-xl font-semibold mb-6 text-slate-200 flex items-center gap-2">
-                <span className={`w-3 h-3 rounded-full ${activeTab === 'masuk' ? 'bg-emerald-500' : 'bg-rose-500'}`}></span>
-                Input khusus {activeTab === 'masuk' ? 'Barang Masuk' : 'Barang Keluar'}
-              </h2>
+            {/* Form Card (Disembunyikan jika akun viewer) */}
+            {userRole !== 'viewer' && (
+              <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-6 backdrop-blur-xl shadow-xl">
+                <h2 className="text-xl font-semibold mb-6 text-slate-200 flex items-center gap-2">
+                  <span className={`w-3 h-3 rounded-full ${activeTab === 'masuk' ? 'bg-emerald-500' : 'bg-rose-500'}`}></span>
+                  Input khusus {activeTab === 'masuk' ? 'Barang Masuk' : 'Barang Keluar'}
+                </h2>
 
-              <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
-                    Surat Jalan / Asal
-                  </label>
-                  <input
-                    type="text"
-                    value={formData.asal}
-                    onChange={e => setFormData({ ...formData, asal: e.target.value })}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-slate-200 focus:outline-none focus:border-indigo-500 transition-all text-sm"
-                    placeholder="Contoh: SJ-001 / Vendor A"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
-                    Serial Number (SN)
-                  </label>
-                  <input
-                    type="text"
-                    value={formData.sn}
-                    onChange={e => setFormData({ ...formData, sn: e.target.value })}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-slate-200 focus:outline-none focus:border-indigo-500 transition-all text-sm"
-                    placeholder="SN12345678"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
-                    Nama Barang
-                  </label>
-                  <input
-                    type="text"
-                    value={formData.nama}
-                    onChange={e => setFormData({ ...formData, nama: e.target.value })}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-slate-200 focus:outline-none focus:border-indigo-500 transition-all text-sm"
-                    placeholder="Masukkan nama barang"
-                  />
-                </div>
-
-                {activeTab === 'keluar' && (
+                <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
                   <div>
-                    <label className="block text-xs font-semibold text-amber-400 uppercase tracking-wider mb-2">
-                      Status Transaksi Keluar
+                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
+                      Surat Jalan / Asal
                     </label>
-                    <select
-                      value={formData.status_keluar}
-                      onChange={e => setFormData({ ...formData, status_keluar: e.target.value })}
-                      className="w-full bg-slate-950 border border-amber-500/40 rounded-xl px-4 py-2.5 text-amber-300 focus:outline-none focus:border-amber-500 transition-all text-sm font-semibold"
-                    >
-                      <option value="Keluar Permanen">🔴 Keluar Permanen (Dijual/Pakai)</option>
-                      <option value="Pinjam">🟡 Pinjam (Sementara)</option>
-                    </select>
+                    <input
+                      type="text"
+                      value={formData.asal}
+                      onChange={e => setFormData({ ...formData, asal: e.target.value })}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-slate-200 focus:outline-none focus:border-indigo-500 transition-all text-sm"
+                      placeholder="Contoh: SJ-001 / Vendor A"
+                    />
                   </div>
-                )}
 
-                <div>
-                  <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
-                    {activeTab === 'masuk' ? 'Quantity Masuk' : 'Quantity Keluar / Pinjam'}
-                  </label>
-                  <input
-                    type="number"
-                    value={formData.qty}
-                    onChange={e => setFormData({ ...formData, qty: e.target.value })}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-slate-200 focus:outline-none focus:border-indigo-500 transition-all text-sm"
-                    placeholder="0"
-                  />
-                </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
+                      Serial Number (SN)
+                    </label>
+                    <input
+                      type="text"
+                      value={formData.sn}
+                      onChange={e => setFormData({ ...formData, sn: e.target.value })}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-slate-200 focus:outline-none focus:border-indigo-500 transition-all text-sm"
+                      placeholder="SN12345678"
+                    />
+                  </div>
 
-                <div>
-                  <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
-                    Tanggal
-                  </label>
-                  <input
-                    type="date"
-                    value={formData.tanggal}
-                    onChange={e => setFormData({ ...formData, tanggal: e.target.value })}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-slate-200 focus:outline-none focus:border-indigo-500 transition-all text-sm"
-                  />
-                </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
+                      Nama Barang
+                    </label>
+                    <input
+                      type="text"
+                      value={formData.nama}
+                      onChange={e => setFormData({ ...formData, nama: e.target.value })}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-slate-200 focus:outline-none focus:border-indigo-500 transition-all text-sm"
+                      placeholder="Masukkan nama barang"
+                    />
+                  </div>
 
-                <div>
-                  <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
-                    Foto Barang (Auto Kompres)
-                  </label>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={(e) => handleFileUpload(e, false)}
-                    className="w-full text-sm text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-slate-800 file:text-slate-200 hover:file:bg-slate-700 cursor-pointer"
-                  />
-                  
-                  {uploading && <p className="text-xs text-indigo-400 mt-1">Mengompres & Uploading foto...</p>}
-                  
-                  {fileSizeInfo.original && !uploading && (
-                    <div className="mt-2 text-xs flex items-center gap-2 bg-slate-950/80 p-2 rounded-lg border border-slate-800">
-                      <span className="text-slate-400">
-                        Awal: <strong className="text-rose-400">{fileSizeInfo.original}</strong>
-                      </span>
-                      {fileSizeInfo.compressed && (
-                        <>
-                          <span className="text-slate-600">➔</span>
-                          <span className="text-slate-400">
-                            Hasil: <strong className="text-emerald-400">{fileSizeInfo.compressed}</strong>
-                          </span>
-                        </>
-                      )}
+                  {activeTab === 'keluar' && (
+                    <div>
+                      <label className="block text-xs font-semibold text-amber-400 uppercase tracking-wider mb-2">
+                        Status Transaksi Keluar
+                      </label>
+                      <select
+                        value={formData.status_keluar}
+                        onChange={e => setFormData({ ...formData, status_keluar: e.target.value })}
+                        className="w-full bg-slate-950 border border-amber-500/40 rounded-xl px-4 py-2.5 text-amber-300 focus:outline-none focus:border-amber-500 transition-all text-sm font-semibold"
+                      >
+                        <option value="Keluar Permanen">🔴 Keluar Permanen (Dijual/Pakai)</option>
+                        <option value="Pinjam">🟡 Pinjam (Sementara)</option>
+                      </select>
                     </div>
                   )}
-                </div>
 
-                <div className="md:col-span-2 lg:col-span-3">
-                  <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
-                    Keterangan
-                  </label>
-                  <input
-                    type="text"
-                    value={formData.ket}
-                    onChange={e => setFormData({ ...formData, ket: e.target.value })}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-slate-200 focus:outline-none focus:border-indigo-500 transition-all text-sm"
-                    placeholder={activeTab === 'keluar' && formData.status_keluar === 'Pinjam' ? 'Peminjam, tujuan, estimasi balik, dll' : 'Catatan atau keterangan tambahan'}
-                  />
-                </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
+                      {activeTab === 'masuk' ? 'Quantity Masuk' : 'Quantity Keluar / Pinjam'}
+                    </label>
+                    <input
+                      type="number"
+                      value={formData.qty}
+                      onChange={e => setFormData({ ...formData, qty: e.target.value })}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-slate-200 focus:outline-none focus:border-indigo-500 transition-all text-sm"
+                      placeholder="0"
+                    />
+                  </div>
 
-                <div className="md:col-span-2 lg:col-span-3 mt-2">
-                  <button
-                    type="submit"
-                    className={`w-full py-3 px-6 rounded-xl font-medium text-white shadow-lg transition-all ${
-                      activeTab === 'masuk'
-                        ? 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-950/50'
-                        : formData.status_keluar === 'Pinjam'
-                        ? 'bg-amber-600 hover:bg-amber-500 shadow-amber-950/50'
-                        : 'bg-rose-600 hover:bg-rose-500 shadow-rose-950/50'
-                    }`}
-                  >
-                    Simpan {activeTab === 'masuk' ? 'Barang Masuk' : formData.status_keluar === 'Pinjam' ? 'Pinjaman Barang' : 'Barang Keluar'}
-                  </button>
-                </div>
-              </form>
-            </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
+                      Tanggal
+                    </label>
+                    <input
+                      type="date"
+                      value={formData.tanggal}
+                      onChange={e => setFormData({ ...formData, tanggal: e.target.value })}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-slate-200 focus:outline-none focus:border-indigo-500 transition-all text-sm"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
+                      Foto Barang (Auto Kompres)
+                    </label>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={(e) => handleFileUpload(e, false)}
+                      className="w-full text-sm text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-slate-800 file:text-slate-200 hover:file:bg-slate-700 cursor-pointer"
+                    />
+                    
+                    {uploading && <p className="text-xs text-indigo-400 mt-1">Mengompres & Uploading foto...</p>}
+                    
+                    {fileSizeInfo.original && !uploading && (
+                      <div className="mt-2 text-xs flex items-center gap-2 bg-slate-950/80 p-2 rounded-lg border border-slate-800">
+                        <span className="text-slate-400">
+                          Awal: <strong className="text-rose-400">{fileSizeInfo.original}</strong>
+                        </span>
+                        {fileSizeInfo.compressed && (
+                          <>
+                            <span className="text-slate-600">➔</span>
+                            <span className="text-slate-400">
+                              Hasil: <strong className="text-emerald-400">{fileSizeInfo.compressed}</strong>
+                            </span>
+                          </>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="md:col-span-2 lg:col-span-3">
+                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
+                      Keterangan
+                    </label>
+                    <input
+                      type="text"
+                      value={formData.ket}
+                      onChange={e => setFormData({ ...formData, ket: e.target.value })}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-slate-200 focus:outline-none focus:border-indigo-500 transition-all text-sm"
+                      placeholder={activeTab === 'keluar' && formData.status_keluar === 'Pinjam' ? 'Peminjam, tujuan, estimasi balik, dll' : 'Catatan atau keterangan tambahan'}
+                    />
+                  </div>
+
+                  <div className="md:col-span-2 lg:col-span-3 mt-2">
+                    <button
+                      type="submit"
+                      className={`w-full py-3 px-6 rounded-xl font-medium text-white shadow-lg transition-all ${
+                        activeTab === 'masuk'
+                          ? 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-950/50'
+                          : formData.status_keluar === 'Pinjam'
+                          ? 'bg-amber-600 hover:bg-amber-500 shadow-amber-950/50'
+                          : 'bg-rose-600 hover:bg-rose-500 shadow-rose-950/50'
+                      }`}
+                    >
+                      Simpan {activeTab === 'masuk' ? 'Barang Masuk' : formData.status_keluar === 'Pinjam' ? 'Pinjaman Barang' : 'Barang Keluar'}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            )}
 
             {/* Tabel Card */}
             <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-6 backdrop-blur-xl shadow-xl space-y-6">
@@ -1177,7 +1184,7 @@ export default function App() {
                                 </td>
                                 
                                 <td className="py-3 px-4 text-center flex items-center justify-center gap-1.5">
-                                  {isPinjam && (
+                                  {userRole !== 'viewer' && isPinjam && (
                                     <button
                                       onClick={() => openReturnModal(log)}
                                       className="px-2.5 py-1.5 bg-amber-500/10 hover:bg-amber-500 text-amber-400 hover:text-white rounded-lg text-xs font-medium border border-amber-500/20 transition-all"
@@ -1187,13 +1194,15 @@ export default function App() {
                                     </button>
                                   )}
 
-                                  <button
-                                    onClick={() => openEditModal(log)}
-                                    className="px-2.5 py-1.5 bg-indigo-500/10 hover:bg-indigo-600 text-indigo-400 hover:text-white rounded-lg text-xs font-medium border border-indigo-500/20 transition-all"
-                                    title="Edit Transaksi Ini"
-                                  >
-                                    ✏️ Edit
-                                  </button>
+                                  {userRole !== 'viewer' && (
+                                    <button
+                                      onClick={() => openEditModal(log)}
+                                      className="px-2.5 py-1.5 bg-indigo-500/10 hover:bg-indigo-600 text-indigo-400 hover:text-white rounded-lg text-xs font-medium border border-indigo-500/20 transition-all"
+                                      title="Edit Transaksi Ini"
+                                    >
+                                      ✏️ Edit
+                                    </button>
+                                  )}
 
                                   <button
                                     onClick={() => handlePrintPDF(log)}
@@ -1203,12 +1212,14 @@ export default function App() {
                                     🖨️ PDF
                                   </button>
 
-                                  <button
-                                    onClick={() => handleDelete(log)}
-                                    className="px-2.5 py-1.5 bg-rose-500/10 hover:bg-rose-500 text-rose-400 hover:text-white rounded-lg text-xs font-medium border border-rose-500/20 transition-all"
-                                  >
-                                    Hapus
-                                  </button>
+                                  {userRole !== 'viewer' && (
+                                    <button
+                                      onClick={() => handleDelete(log)}
+                                      className="px-2.5 py-1.5 bg-rose-500/10 hover:bg-rose-500 text-rose-400 hover:text-white rounded-lg text-xs font-medium border border-rose-500/20 transition-all"
+                                    >
+                                      Hapus
+                                    </button>
+                                  )}
                                 </td>
                               </tr>
                             );
