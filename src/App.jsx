@@ -15,19 +15,28 @@ export default function App() {
   const [logs, setLogs] = useState([]);
   const [allLogs, setAllLogs] = useState([]);
   const [auditLogs, setAuditLogs] = useState([]);
+  const [kategoriList, setKategoriList] = useState([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
 
   const [search, setSearch] = useState('');
   const [selectedMonth, setSelectedMonth] = useState('all');
+  const [selectedKategoriFilter, setSelectedKategoriFilter] = useState('all');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [onlyPinjam, setOnlyPinjam] = useState(false);
 
   const [fileSizeInfo, setFileSizeInfo] = useState({ original: '', compressed: '' });
 
+  // State modal/form tambah kategori baru
+  const [showNewKatForm, setShowNewKatForm] = useState(false);
+  const [newKatData, setNewKatData] = useState({ kategori: '', sub_kategori: '' });
+  const [savingKat, setSavingKat] = useState(false);
+
   const [formData, setFormData] = useState({
     asal: '',
+    kategori: '',
+    sub_kategori: '',
     sn: '',
     nama: '',
     qty: '',
@@ -56,6 +65,8 @@ export default function App() {
     id: null,
     tipe: '',
     asal: '',
+    kategori: '',
+    sub_kategori: '',
     sn: '',
     nama: '',
     qty: '',
@@ -177,8 +188,21 @@ export default function App() {
     }
   }, [authLoading, session, userRole, location.pathname, navigate]);
 
+  const fetchKategori = async () => {
+    const { data, error } = await supabase
+      .from('kategori_barang')
+      .select('*')
+      .order('kategori', { ascending: true })
+      .order('sub_kategori', { ascending: true });
+
+    if (!error) {
+      setKategoriList(data || []);
+    }
+  };
+
   useEffect(() => {
     if (session) {
+      fetchKategori();
       fetchAllLogsForStock();
       if (activeTab === 'audit') {
         fetchAuditLogs();
@@ -187,6 +211,7 @@ export default function App() {
       }
       setSearch('');
       setSelectedMonth('all');
+      setSelectedKategoriFilter('all');
       setStartDate('');
       setEndDate('');
       setOnlyPinjam(false);
@@ -202,7 +227,7 @@ export default function App() {
     const { data, error } = await supabase
       .from('stok_barang')
       .select('*')
-      .order('tanggal', { ascending: false });
+      .order('tanggal', { ascending: true });
 
     if (!error) {
       setAllLogs(data || []);
@@ -242,6 +267,77 @@ export default function App() {
       setAuditLogs(data || []);
     }
     setLoading(false);
+  };
+
+  // --- KATEGORI & SUB-KATEGORI HELPERS ---
+  const uniqueCategories = useMemo(() => {
+    const setKat = new Set(
+      kategoriList.map((item) => item.kategori?.trim()).filter(Boolean)
+    );
+    return Array.from(setKat);
+  }, [kategoriList]);
+
+  const formSubCategories = useMemo(() => {
+    if (!formData.kategori) return [];
+    return kategoriList
+      .filter(
+        (item) =>
+          item.kategori?.trim().toLowerCase() ===
+          formData.kategori.trim().toLowerCase()
+      )
+      .map((item) => item.sub_kategori?.trim())
+      .filter(Boolean);
+  }, [kategoriList, formData.kategori]);
+
+  const editSubCategories = useMemo(() => {
+    if (!editModal.kategori) return [];
+    return kategoriList
+      .filter(
+        (item) =>
+          item.kategori?.trim().toLowerCase() ===
+          editModal.kategori.trim().toLowerCase()
+      )
+      .map((item) => item.sub_kategori?.trim())
+      .filter(Boolean);
+  }, [kategoriList, editModal.kategori]);
+
+  const handleSaveNewKategori = async () => {
+    const kat = newKatData.kategori.trim();
+    const sub = newKatData.sub_kategori.trim();
+    if (!kat || !sub) {
+      showAlert('Data Belum Lengkap', 'Nama Kategori dan Sub-Kategori wajib diisi!', 'danger');
+      return;
+    }
+
+    const exists = kategoriList.some(
+      (item) =>
+        item.kategori?.trim().toLowerCase() === kat.toLowerCase() &&
+        item.sub_kategori?.trim().toLowerCase() === sub.toLowerCase()
+    );
+
+    if (exists) {
+      setFormData((prev) => ({ ...prev, kategori: kat, sub_kategori: sub }));
+      setNewKatData({ kategori: '', sub_kategori: '' });
+      setShowNewKatForm(false);
+      return;
+    }
+
+    setSavingKat(true);
+    const { error } = await supabase
+      .from('kategori_barang')
+      .insert([{ kategori: kat, sub_kategori: sub }]);
+
+    if (error) {
+      showAlert('Gagal Menyimpan Kategori', error.message, 'danger');
+    } else {
+      await recordAudit('TAMBAH', `Menambah Kategori Baru: ${kat} > ${sub}`);
+      await fetchKategori();
+      setFormData((prev) => ({ ...prev, kategori: kat, sub_kategori: sub }));
+      setNewKatData({ kategori: '', sub_kategori: '' });
+      setShowNewKatForm(false);
+      showAlert('Kategori Ditambahkan', `Kategori "${kat} > ${sub}" berhasil dibuat.`, 'success');
+    }
+    setSavingKat(false);
   };
 
   const compressImage = (file, maxWidth = 1000, quality = 0.7) => {
@@ -385,6 +481,8 @@ export default function App() {
     const newEntry = {
       tipe: activeTab === 'masuk' ? 'Barang Masuk' : 'Barang Keluar',
       asal: formData.asal,
+      kategori: formData.kategori || '-',
+      sub_kategori: formData.sub_kategori || '-',
       sn: formData.sn,
       nama: formData.nama,
       qty: inputQty,
@@ -400,11 +498,13 @@ export default function App() {
     } else {
       await recordAudit(
         'TAMBAH',
-        `Menambah ${newEntry.tipe}: "${newEntry.nama}" sebanyak ${newEntry.qty} Unit (Asal/SJ: ${newEntry.asal || '-'})`
+        `Menambah ${newEntry.tipe}: "${newEntry.nama}" sebanyak ${newEntry.qty} Unit (Kategori: ${newEntry.kategori} > ${newEntry.sub_kategori})`
       );
 
       setFormData({
         asal: '',
+        kategori: '',
+        sub_kategori: '',
         sn: '',
         nama: '',
         qty: '',
@@ -430,6 +530,8 @@ export default function App() {
       id: log.id,
       tipe: log.tipe,
       asal: log.asal || '',
+      kategori: log.kategori && log.kategori !== '-' ? log.kategori : '',
+      sub_kategori: log.sub_kategori && log.sub_kategori !== '-' ? log.sub_kategori : '',
       sn: log.sn || '',
       nama: log.nama || '',
       qty: log.qty || 0,
@@ -447,6 +549,8 @@ export default function App() {
 
     const updatedData = {
       asal: editModal.asal,
+      kategori: editModal.kategori || '-',
+      sub_kategori: editModal.sub_kategori || '-',
       sn: editModal.sn,
       nama: editModal.nama,
       qty: parseInt(editModal.qty, 10) || 0,
@@ -504,6 +608,8 @@ export default function App() {
     const returnEntry = {
       tipe: 'Barang Masuk',
       asal: `Pengembalian Pinjaman (${log.asal || '-'})`,
+      kategori: log.kategori || '-',
+      sub_kategori: log.sub_kategori || '-',
       sn: log.sn,
       nama: log.nama,
       qty: parseInt(log.qty, 10) || 0,
@@ -614,6 +720,10 @@ export default function App() {
               <td>${log.tanggal}</td>
             </tr>
             <tr>
+              <td class="info-label">Kategori / Sub-Kategori</td>
+              <td>${log.kategori || '-'} / ${log.sub_kategori || '-'}</td>
+            </tr>
+            <tr>
               <td class="info-label">Surat Jalan / Asal / Tujuan</td>
               <td>${log.asal || '-'}</td>
             </tr>
@@ -671,12 +781,19 @@ export default function App() {
       const matchSearch =
         log.nama?.toLowerCase().includes(search.toLowerCase()) ||
         log.sn?.toLowerCase().includes(search.toLowerCase()) ||
-        log.asal?.toLowerCase().includes(search.toLowerCase());
+        log.asal?.toLowerCase().includes(search.toLowerCase()) ||
+        log.kategori?.toLowerCase().includes(search.toLowerCase()) ||
+        log.sub_kategori?.toLowerCase().includes(search.toLowerCase());
 
       let matchMonth = true;
       if (selectedMonth !== 'all' && log.tanggal) {
         const logMonth = new Date(log.tanggal).getMonth().toString();
         matchMonth = logMonth === selectedMonth;
+      }
+
+      let matchKategori = true;
+      if (selectedKategoriFilter !== 'all') {
+        matchKategori = log.kategori === selectedKategoriFilter;
       }
 
       let matchDateRange = true;
@@ -692,9 +809,9 @@ export default function App() {
         matchPinjam = log.ket?.includes('[DIPINJAM]');
       }
 
-      return matchSearch && matchMonth && matchDateRange && matchPinjam;
+      return matchSearch && matchMonth && matchKategori && matchDateRange && matchPinjam;
     });
-  }, [logs, search, selectedMonth, startDate, endDate, activeTab, onlyPinjam]);
+  }, [logs, search, selectedMonth, selectedKategoriFilter, startDate, endDate, activeTab, onlyPinjam]);
 
   const filteredAuditLogs = useMemo(() => {
     return auditLogs.filter((a) => {
@@ -726,6 +843,8 @@ export default function App() {
     const headers = [
       'No',
       'Tipe Transaksi',
+      'Kategori',
+      'Sub-Kategori',
       'Asal / Surat Jalan',
       'Serial Number (SN)',
       'Nama Barang',
@@ -744,6 +863,8 @@ export default function App() {
       return [
         index + 1,
         `"${log.tipe}"`,
+        `"${(log.kategori || '-').replace(/"/g, '""')}"`,
+        `"${(log.sub_kategori || '-').replace(/"/g, '""')}"`,
         `"${(log.asal || '-').replace(/"/g, '""')}"`,
         `"${(log.sn || '-').replace(/"/g, '""')}"`,
         `"${(log.nama || '-').replace(/"/g, '""')}"`,
@@ -1002,7 +1123,9 @@ export default function App() {
         {activeTab === 'maqna' ? (
           <StockMaqna
             transaksi={allLogs}
+            kategoriList={kategoriList}
             onRefresh={fetchAllLogsForStock}
+            onRefreshKategori={fetchKategori}
             onRecordAudit={recordAudit}
             isReadOnly={userRole === 'viewer'}
           />
@@ -1242,19 +1365,123 @@ export default function App() {
             {/* Form Card (Disembunyikan jika akun viewer) */}
             {userRole !== 'viewer' && (
               <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-6 backdrop-blur-xl shadow-xl">
-                <h2 className="text-xl font-semibold mb-6 text-slate-200 flex items-center gap-2">
-                  <span
-                    className={`w-3 h-3 rounded-full ${
-                      activeTab === 'masuk' ? 'bg-emerald-500' : 'bg-rose-500'
-                    }`}
-                  ></span>
-                  Input khusus {activeTab === 'masuk' ? 'Barang Masuk' : 'Barang Keluar'}
-                </h2>
+                <div className="flex flex-wrap items-center justify-between gap-2 mb-6">
+                  <h2 className="text-xl font-semibold text-slate-200 flex items-center gap-2">
+                    <span
+                      className={`w-3 h-3 rounded-full ${
+                        activeTab === 'masuk' ? 'bg-emerald-500' : 'bg-rose-500'
+                      }`}
+                    ></span>
+                    Input khusus {activeTab === 'masuk' ? 'Barang Masuk' : 'Barang Keluar'}
+                  </h2>
+
+                  <button
+                    type="button"
+                    onClick={() => setShowNewKatForm(!showNewKatForm)}
+                    className="px-3.5 py-2 rounded-xl bg-indigo-500/10 hover:bg-indigo-600 text-indigo-400 hover:text-white border border-indigo-500/20 text-xs font-semibold transition-all"
+                  >
+                    {showNewKatForm ? '✕ Tutup Form Kategori' : '+ Buat Kategori Baru'}
+                  </button>
+                </div>
+
+                {/* Form Mini Tambah Kategori Baru */}
+                {showNewKatForm && (
+                  <div className="mb-6 p-4 rounded-xl bg-slate-950/90 border border-indigo-500/30 space-y-3">
+                    <p className="text-xs font-semibold text-indigo-400 uppercase tracking-wider">
+                      Tambah Kategori &amp; Sub-Kategori Baru
+                    </p>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      <input
+                        type="text"
+                        list="existing-kat-app"
+                        value={newKatData.kategori}
+                        onChange={(e) =>
+                          setNewKatData({ ...newKatData, kategori: e.target.value })
+                        }
+                        placeholder="Nama Kategori (misal: Alat Medis)"
+                        className="bg-slate-900 border border-slate-800 rounded-xl px-4 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500"
+                      />
+                      <datalist id="existing-kat-app">
+                        {uniqueCategories.map((k) => (
+                          <option key={k} value={k} />
+                        ))}
+                      </datalist>
+
+                      <input
+                        type="text"
+                        value={newKatData.sub_kategori}
+                        onChange={(e) =>
+                          setNewKatData({ ...newKatData, sub_kategori: e.target.value })
+                        }
+                        placeholder="Nama Sub-Kategori (misal: USG)"
+                        className="bg-slate-900 border border-slate-800 rounded-xl px-4 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500"
+                      />
+
+                      <button
+                        type="button"
+                        disabled={savingKat}
+                        onClick={handleSaveNewKategori}
+                        className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold shadow-lg shadow-indigo-950/50 transition-all"
+                      >
+                        {savingKat ? 'Menyimpan...' : 'Simpan Kategori'}
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 <form
                   onSubmit={handleSubmit}
                   className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5"
                 >
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
+                      Kategori
+                    </label>
+                    <select
+                      value={formData.kategori}
+                      onChange={(e) =>
+                        setFormData({
+                          ...formData,
+                          kategori: e.target.value,
+                          sub_kategori: '',
+                        })
+                      }
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-slate-200 focus:outline-none focus:border-indigo-500 transition-all text-sm"
+                    >
+                      <option value="">-- Pilih Kategori --</option>
+                      {uniqueCategories.map((kat) => (
+                        <option key={kat} value={kat}>
+                          {kat}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
+                      Sub-Kategori
+                    </label>
+                    <select
+                      value={formData.sub_kategori}
+                      disabled={!formData.kategori}
+                      onChange={(e) =>
+                        setFormData({ ...formData, sub_kategori: e.target.value })
+                      }
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-slate-200 disabled:opacity-50 focus:outline-none focus:border-indigo-500 transition-all text-sm"
+                    >
+                      <option value="">
+                        {formData.kategori
+                          ? '-- Pilih Sub-Kategori --'
+                          : '-- Pilih Kategori Dulu --'}
+                      </option>
+                      {formSubCategories.map((sub) => (
+                        <option key={sub} value={sub}>
+                          {sub}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
                   <div>
                     <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
                       Surat Jalan / Asal
@@ -1470,6 +1697,19 @@ export default function App() {
                     Export Excel
                   </button>
 
+                  <select
+                    value={selectedKategoriFilter}
+                    onChange={(e) => setSelectedKategoriFilter(e.target.value)}
+                    className="bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500"
+                  >
+                    <option value="all">Semua Kategori</option>
+                    {uniqueCategories.map((kat) => (
+                      <option key={kat} value={kat}>
+                        {kat}
+                      </option>
+                    ))}
+                  </select>
+
                   <div className="flex items-center bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5 gap-2 text-xs">
                     <span className="text-slate-400 font-medium">Dari:</span>
                     <input
@@ -1509,7 +1749,7 @@ export default function App() {
 
                   <input
                     type="text"
-                    placeholder="Cari Nama / SN / SJ..."
+                    placeholder="Cari Nama / Kategori / SN..."
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
                     className="bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500 w-full sm:w-52"
@@ -1543,6 +1783,7 @@ export default function App() {
                   <thead className="bg-slate-950 text-slate-400 font-semibold uppercase text-xs border-b border-slate-800">
                     <tr>
                       <th className="py-3.5 px-4">Tipe</th>
+                      <th className="py-3.5 px-4">Kategori / Sub</th>
                       <th className="py-3.5 px-4">Asal / SJ</th>
                       <th className="py-3.5 px-4">SN</th>
                       <th className="py-3.5 px-4">Nama Barang</th>
@@ -1558,13 +1799,13 @@ export default function App() {
                   <tbody className="divide-y divide-slate-800/60">
                     {loading ? (
                       <tr>
-                        <td colSpan="9" className="text-center py-8 text-slate-500">
+                        <td colSpan="10" className="text-center py-8 text-slate-500">
                           Memuat data...
                         </td>
                       </tr>
                     ) : Object.keys(groupedLogs).length === 0 ? (
                       <tr>
-                        <td colSpan="9" className="text-center py-8 text-slate-500">
+                        <td colSpan="10" className="text-center py-8 text-slate-500">
                           Belum ada riwayat data
                         </td>
                       </tr>
@@ -1573,7 +1814,7 @@ export default function App() {
                         <React.Fragment key={monthName}>
                           <tr className="bg-slate-950/80">
                             <td
-                              colSpan="9"
+                              colSpan="10"
                               className="py-2.5 px-4 font-bold text-xs uppercase tracking-wider text-emerald-400 border-y border-slate-800/80"
                             >
                               📅 Bulan: {monthName} ({items.length} Transaksi)
@@ -1603,6 +1844,24 @@ export default function App() {
                                     </span>
                                   )}
                                 </td>
+
+                                <td className="py-3 px-4">
+                                  {log.kategori && log.kategori !== '-' ? (
+                                    <div className="flex flex-col gap-0.5">
+                                      <span className="px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-300 border border-indigo-500/20 text-xs font-semibold w-fit">
+                                        {log.kategori}
+                                      </span>
+                                      {log.sub_kategori && log.sub_kategori !== '-' && (
+                                        <span className="text-[11px] text-slate-400 pl-1">
+                                          ↳ {log.sub_kategori}
+                                        </span>
+                                      )}
+                                    </div>
+                                  ) : (
+                                    <span className="text-xs text-slate-600">-</span>
+                                  )}
+                                </td>
+
                                 <td className="py-3 px-4">{log.asal || '-'}</td>
                                 <td className="py-3 px-4 font-mono text-slate-400">
                                   {log.sn || '-'}
@@ -1727,6 +1986,51 @@ export default function App() {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-left">
+              <div>
+                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">
+                  Kategori
+                </label>
+                <select
+                  value={editModal.kategori}
+                  onChange={(e) =>
+                    setEditModal({
+                      ...editModal,
+                      kategori: e.target.value,
+                      sub_kategori: '',
+                    })
+                  }
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 focus:outline-none focus:border-indigo-500 text-sm"
+                >
+                  <option value="">-- Tanpa Kategori --</option>
+                  {uniqueCategories.map((kat) => (
+                    <option key={kat} value={kat}>
+                      {kat}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">
+                  Sub-Kategori
+                </label>
+                <select
+                  value={editModal.sub_kategori}
+                  disabled={!editModal.kategori}
+                  onChange={(e) =>
+                    setEditModal({ ...editModal, sub_kategori: e.target.value })
+                  }
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 disabled:opacity-50 focus:outline-none focus:border-indigo-500 text-sm"
+                >
+                  <option value="">-- Pilih Sub-Kategori --</option>
+                  {editSubCategories.map((sub) => (
+                    <option key={sub} value={sub}>
+                      {sub}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
               <div>
                 <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">
                   Surat Jalan / Asal

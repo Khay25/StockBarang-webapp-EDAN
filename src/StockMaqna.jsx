@@ -5,21 +5,92 @@ export default function StockMaqna({
   transaksi = [],
   barangMasuk = [],
   barangKeluar = [],
+  kategoriList = [],
   onRefresh,
+  onRefreshKategori,
   onRecordAudit,
   isReadOnly = false,
 }) {
   const [search, setSearch] = useState('');
   const [filterStok, setFilterStok] = useState('semua');
+  const [filterKategori, setFilterKategori] = useState('all');
   const [saving, setSaving] = useState(false);
 
   const [manualForm, setManualForm] = useState({
+    kategori: '',
+    sub_kategori: '',
     nama: '',
     tipe_barang: '',
     sn: '',
     qty: '',
     ket: '',
   });
+
+  // State untuk form tambah kategori baru
+  const [showAddKat, setShowAddKat] = useState(false);
+  const [newKat, setNewKat] = useState({ kategori: '', sub_kategori: '' });
+  const [savingKat, setSavingKat] = useState(false);
+
+  // Daftar kategori unik
+  const uniqueCategories = useMemo(() => {
+    const setKat = new Set(
+      kategoriList.map((item) => item.kategori?.trim()).filter(Boolean)
+    );
+    return Array.from(setKat);
+  }, [kategoriList]);
+
+  // Daftar sub-kategori sesuai kategori yang dipilih
+  const availableSubCategories = useMemo(() => {
+    if (!manualForm.kategori) return [];
+    return kategoriList
+      .filter(
+        (item) =>
+          item.kategori?.trim().toLowerCase() ===
+          manualForm.kategori.trim().toLowerCase()
+      )
+      .map((item) => item.sub_kategori?.trim())
+      .filter(Boolean);
+  }, [kategoriList, manualForm.kategori]);
+
+  const handleSaveNewKategori = async () => {
+    const kat = newKat.kategori.trim();
+    const sub = newKat.sub_kategori.trim();
+    if (!kat || !sub) {
+      alert('Nama Kategori dan Sub-Kategori wajib diisi!');
+      return;
+    }
+
+    const exists = kategoriList.some(
+      (item) =>
+        item.kategori?.trim().toLowerCase() === kat.toLowerCase() &&
+        item.sub_kategori?.trim().toLowerCase() === sub.toLowerCase()
+    );
+
+    if (exists) {
+      setManualForm((prev) => ({ ...prev, kategori: kat, sub_kategori: sub }));
+      setNewKat({ kategori: '', sub_kategori: '' });
+      setShowAddKat(false);
+      return;
+    }
+
+    setSavingKat(true);
+    const { error } = await supabase
+      .from('kategori_barang')
+      .insert([{ kategori: kat, sub_kategori: sub }]);
+
+    if (error) {
+      alert('Gagal menambah kategori: ' + error.message);
+    } else {
+      if (onRecordAudit) {
+        await onRecordAudit('TAMBAH', `Menambah Kategori Baru: ${kat} > ${sub}`);
+      }
+      if (onRefreshKategori) await onRefreshKategori();
+      setManualForm((prev) => ({ ...prev, kategori: kat, sub_kategori: sub }));
+      setNewKat({ kategori: '', sub_kategori: '' });
+      setShowAddKat(false);
+    }
+    setSavingKat(false);
+  };
 
   const handleManualSubmit = async (e) => {
     e.preventDefault();
@@ -40,6 +111,8 @@ export default function StockMaqna({
     const payload = {
       tipe: 'Barang Masuk',
       asal: 'Input Manual Stock Maqna',
+      kategori: manualForm.kategori || '-',
+      sub_kategori: manualForm.sub_kategori || '-',
       sn: manualForm.sn.trim(),
       nama: manualForm.nama.trim(),
       qty: inputQty,
@@ -60,6 +133,8 @@ export default function StockMaqna({
         );
       }
       setManualForm({
+        kategori: '',
+        sub_kategori: '',
         nama: '',
         tipe_barang: '',
         sn: '',
@@ -98,12 +173,12 @@ export default function StockMaqna({
       const tipeBarang = (
         item.tipe_barang ||
         extractedTipe ||
-        item.kategori ||
-        item.category ||
         item.merk ||
         '-'
       ).trim();
 
+      const kategori = (item.kategori || '-').trim();
+      const subKategori = (item.sub_kategori || '-').trim();
       const sn = (item.sn || item.serial_number || '-').trim();
       const qty = Number(item.qty ?? item.jumlah ?? item.quantity ?? 0) || 0;
 
@@ -115,6 +190,8 @@ export default function StockMaqna({
       if (!mapBarang.has(key)) {
         mapBarang.set(key, {
           id: key,
+          kategori: kategori,
+          sub_kategori: subKategori,
           nama_barang: nama,
           tipe_barang: tipeBarang,
           sn: sn || '-',
@@ -131,6 +208,8 @@ export default function StockMaqna({
         existing.qty -= qty;
       }
 
+      if (kategori && kategori !== '-') existing.kategori = kategori;
+      if (subKategori && subKategori !== '-') existing.sub_kategori = subKategori;
       if (tipeBarang && tipeBarang !== '-') existing.tipe_barang = tipeBarang;
       if (cleanKet) existing.keterangan = cleanKet;
     });
@@ -145,14 +224,17 @@ export default function StockMaqna({
         row.nama_barang.toLowerCase().includes(keyword) ||
         row.tipe_barang.toLowerCase().includes(keyword) ||
         row.sn.toLowerCase().includes(keyword) ||
+        row.kategori.toLowerCase().includes(keyword) ||
+        row.sub_kategori.toLowerCase().includes(keyword) ||
         row.keterangan.toLowerCase().includes(keyword);
 
       if (!matchSearch) return false;
+      if (filterKategori !== 'all' && row.kategori !== filterKategori) return false;
       if (filterStok === 'tersedia') return row.qty > 0;
       if (filterStok === 'habis') return row.qty <= 0;
       return true;
     });
-  }, [stokMaqna, search, filterStok]);
+  }, [stokMaqna, search, filterStok, filterKategori]);
 
   const totalUnit = useMemo(
     () => stokMaqna.reduce((acc, item) => acc + (item.qty > 0 ? item.qty : 0), 0),
@@ -160,8 +242,18 @@ export default function StockMaqna({
   );
 
   const handleExportCSV = () => {
-    const headers = ['Nama Barang', 'Tipe Barang', 'SN', 'Qty', 'Keterangan'];
+    const headers = [
+      'Kategori',
+      'Sub-Kategori',
+      'Nama Barang',
+      'Tipe Barang',
+      'SN',
+      'Qty',
+      'Keterangan',
+    ];
     const rows = filteredData.map((r) => [
+      `"${r.kategori.replace(/"/g, '""')}"`,
+      `"${r.sub_kategori.replace(/"/g, '""')}"`,
       `"${r.nama_barang.replace(/"/g, '""')}"`,
       `"${r.tipe_barang.replace(/"/g, '""')}"`,
       `"${r.sn.replace(/"/g, '""')}"`,
@@ -188,12 +280,114 @@ export default function StockMaqna({
     <div className="space-y-6">
       {!isReadOnly && (
         <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-6 backdrop-blur-xl shadow-xl">
-          <h2 className="text-lg font-semibold mb-4 text-slate-200 flex items-center gap-2">
-            <span className="w-3 h-3 rounded-full bg-cyan-500"></span>
-            Input Manual Stock Barang Maqna
-          </h2>
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
+            <h2 className="text-lg font-semibold text-slate-200 flex items-center gap-2">
+              <span className="w-3 h-3 rounded-full bg-cyan-500"></span>
+              Input Manual Stock Barang Maqna
+            </h2>
+            <button
+              type="button"
+              onClick={() => setShowAddKat(!showAddKat)}
+              className="px-3 py-1.5 rounded-xl bg-indigo-500/10 hover:bg-indigo-600 text-indigo-400 hover:text-white border border-indigo-500/20 text-xs font-semibold transition-all"
+            >
+              {showAddKat ? '✕ Tutup Form Kategori' : '+ Buat Kategori Baru'}
+            </button>
+          </div>
+
+          {showAddKat && (
+            <div className="mb-5 p-4 rounded-xl bg-slate-950/90 border border-indigo-500/30 space-y-3">
+              <p className="text-xs font-semibold text-indigo-400 uppercase">
+                Tambah Kategori &amp; Sub-Kategori Baru
+              </p>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <input
+                  type="text"
+                  list="existing-kat-maqna"
+                  value={newKat.kategori}
+                  onChange={(e) => setNewKat({ ...newKat, kategori: e.target.value })}
+                  placeholder="Nama Kategori (misal: Alat Medis)"
+                  className="px-3.5 py-2 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
+                />
+                <datalist id="existing-kat-maqna">
+                  {uniqueCategories.map((k) => (
+                    <option key={k} value={k} />
+                  ))}
+                </datalist>
+
+                <input
+                  type="text"
+                  value={newKat.sub_kategori}
+                  onChange={(e) =>
+                    setNewKat({ ...newKat, sub_kategori: e.target.value })
+                  }
+                  placeholder="Nama Sub-Kategori (misal: USG)"
+                  className="px-3.5 py-2 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
+                />
+
+                <button
+                  type="button"
+                  disabled={savingKat}
+                  onClick={handleSaveNewKategori}
+                  className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition-all"
+                >
+                  {savingKat ? 'Menyimpan...' : 'Simpan Kategori'}
+                </button>
+              </div>
+            </div>
+          )}
 
           <form onSubmit={handleManualSubmit} className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-400 uppercase mb-1.5">
+                  Kategori
+                </label>
+                <select
+                  value={manualForm.kategori}
+                  onChange={(e) =>
+                    setManualForm({
+                      ...manualForm,
+                      kategori: e.target.value,
+                      sub_kategori: '',
+                    })
+                  }
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-200 focus:outline-none focus:border-cyan-500"
+                >
+                  <option value="">-- Pilih Kategori --</option>
+                  {uniqueCategories.map((kat) => (
+                    <option key={kat} value={kat}>
+                      {kat}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-400 uppercase mb-1.5">
+                  Sub-Kategori
+                </label>
+                <select
+                  value={manualForm.sub_kategori}
+                  disabled={!manualForm.kategori}
+                  onChange={(e) =>
+                    setManualForm({ ...manualForm, sub_kategori: e.target.value })
+                  }
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-200 disabled:opacity-50 focus:outline-none focus:border-cyan-500"
+                >
+                  <option value="">
+                    {manualForm.kategori
+                      ? '-- Pilih Sub-Kategori --'
+                      : '-- Pilih Kategori Dulu --'}
+                  </option>
+                  {availableSubCategories.map((sub) => (
+                    <option key={sub} value={sub}>
+                      {sub}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div>
                 <label className="block text-xs font-semibold text-slate-400 uppercase mb-1.5">
@@ -305,6 +499,19 @@ export default function StockMaqna({
             </button>
 
             <select
+              value={filterKategori}
+              onChange={(e) => setFilterKategori(e.target.value)}
+              className="px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-cyan-500"
+            >
+              <option value="all">Semua Kategori</option>
+              {uniqueCategories.map((kat) => (
+                <option key={kat} value={kat}>
+                  {kat}
+                </option>
+              ))}
+            </select>
+
+            <select
               value={filterStok}
               onChange={(e) => setFilterStok(e.target.value)}
               className="px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-cyan-500"
@@ -318,7 +525,7 @@ export default function StockMaqna({
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Cari Nama / Tipe / SN..."
+              placeholder="Cari Nama / Kategori / SN..."
               className="px-3.5 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-cyan-500 w-56"
             />
           </div>
@@ -328,6 +535,7 @@ export default function StockMaqna({
           <table className="w-full text-left text-sm text-slate-300">
             <thead className="bg-slate-950 text-slate-400 font-semibold uppercase text-xs border-b border-slate-800">
               <tr>
+                <th className="py-3.5 px-4">Kategori / Sub</th>
                 <th className="py-3.5 px-4">Nama Barang</th>
                 <th className="py-3.5 px-4">Tipe Barang</th>
                 <th className="py-3.5 px-4">SN</th>
@@ -338,13 +546,29 @@ export default function StockMaqna({
             <tbody className="divide-y divide-slate-800/60">
               {filteredData.length === 0 ? (
                 <tr>
-                  <td colSpan="5" className="text-center py-8 text-slate-500 text-xs">
+                  <td colSpan="6" className="text-center py-8 text-slate-500 text-xs">
                     Belum ada data stok barang Maqna yang cocok.
                   </td>
                 </tr>
               ) : (
                 filteredData.map((item) => (
                   <tr key={item.id} className="hover:bg-slate-800/40 transition-colors">
+                    <td className="py-3.5 px-4">
+                      {item.kategori !== '-' ? (
+                        <div className="flex flex-col gap-1">
+                          <span className="px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-300 border border-indigo-500/20 text-xs font-semibold w-fit">
+                            {item.kategori}
+                          </span>
+                          {item.sub_kategori !== '-' && (
+                            <span className="text-[11px] text-slate-400 pl-1">
+                              ↳ {item.sub_kategori}
+                            </span>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-xs text-slate-600">-</span>
+                      )}
+                    </td>
                     <td className="py-3.5 px-4 font-semibold text-white">
                       {item.nama_barang}
                     </td>
