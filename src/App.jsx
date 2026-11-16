@@ -100,6 +100,7 @@ export default function App() {
     const email = (user.email || '').toLowerCase();
     if (email.includes('user1') || email.includes('masuk')) return 'masuk';
     if (email.includes('user2') || email.includes('keluar')) return 'keluar';
+    if (email.includes('view')) return 'viewer';
     return 'admin';
   };
 
@@ -736,6 +737,7 @@ export default function App() {
             transaksi={allLogs}
             onRefresh={fetchAllLogsForStock}
             onRecordAudit={recordAudit}
+            isReadOnly={userRole === 'viewer'}
           />
         ) : activeTab === 'audit' ? (
           <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-6 backdrop-blur-xl shadow-xl space-y-6">
@@ -863,7 +865,7 @@ export default function App() {
 
             {/* Form Card */}
             {/* Form Card (Disembunyikan jika akun viewer) */}
-            {userRole !== 'viewer' && (
+            {(userRole === 'admin' || userRole === 'viewer') && (
               <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-6 backdrop-blur-xl shadow-xl">
                 <h2 className="text-xl font-semibold mb-6 text-slate-200 flex items-center gap-2">
                   <span className={`w-3 h-3 rounded-full ${activeTab === 'masuk' ? 'bg-emerald-500' : 'bg-rose-500'}`}></span>
