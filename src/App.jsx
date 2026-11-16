@@ -893,7 +893,7 @@ export default function App() {
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-slate-800 pb-6">
           <div className="flex items-center gap-4">
             <img
-              src="/logoedan.png"
+              src="./logoedan.png"
               alt="Logo EDAN"
               className="h-12 w-auto object-contain rounded-lg"
             />
