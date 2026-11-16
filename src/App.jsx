@@ -153,23 +153,25 @@ export default function App() {
 
   const activeTab = useMemo(() => {
     const path = location.pathname.toLowerCase();
+    if (path.includes('maqna')) return 'maqna';
+
     if (userRole === 'masuk') return 'masuk';
     if (userRole === 'keluar') return 'keluar';
 
     if (path.includes('keluar')) return 'keluar';
     if (path.includes('audit')) return 'audit';
-    if (path.includes('maqna')) return 'maqna';
     return 'masuk';
   }, [location.pathname, userRole]);
 
   useEffect(() => {
     if (!authLoading && session) {
-      if (userRole === 'masuk' && location.pathname !== '/masuk') {
+      const path = location.pathname.toLowerCase();
+      if (userRole === 'masuk' && path !== '/masuk' && path !== '/maqna') {
         navigate('/masuk', { replace: true });
-      } else if (userRole === 'keluar' && location.pathname !== '/keluar') {
+      } else if (userRole === 'keluar' && path !== '/keluar' && path !== '/maqna') {
         navigate('/keluar', { replace: true });
       } else if (location.pathname === '/') {
-        navigate('/masuk', { replace: true });
+        navigate(userRole === 'keluar' ? '/keluar' : '/masuk', { replace: true });
       }
     }
   }, [authLoading, session, userRole, location.pathname, navigate]);
@@ -931,8 +933,8 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-3">
-            {(userRole === 'admin' || userRole === 'viewer') && (
-              <div className="flex flex-wrap bg-slate-900 p-1.5 rounded-2xl border border-slate-800 gap-1">
+            <div className="flex flex-wrap bg-slate-900 p-1.5 rounded-2xl border border-slate-800 gap-1">
+              {(userRole === 'admin' || userRole === 'viewer' || userRole === 'masuk') && (
                 <button
                   onClick={() => navigate('/masuk')}
                   className={`px-4 py-2 text-xs font-semibold rounded-xl transition-all flex items-center gap-2 ${
@@ -944,6 +946,9 @@ export default function App() {
                   <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
                   Barang Masuk
                 </button>
+              )}
+
+              {(userRole === 'admin' || userRole === 'viewer' || userRole === 'keluar') && (
                 <button
                   onClick={() => navigate('/keluar')}
                   className={`px-4 py-2 text-xs font-semibold rounded-xl transition-all flex items-center gap-2 ${
@@ -955,6 +960,9 @@ export default function App() {
                   <span className="w-2 h-2 rounded-full bg-rose-400"></span>
                   Barang Keluar
                 </button>
+              )}
+
+              {(userRole === 'admin' || userRole === 'viewer') && (
                 <button
                   onClick={() => navigate('/audit')}
                   className={`px-4 py-2 text-xs font-semibold rounded-xl transition-all flex items-center gap-2 ${
@@ -965,19 +973,20 @@ export default function App() {
                 >
                   📜 Audit Log
                 </button>
-                <button
-                  onClick={() => navigate('/maqna')}
-                  className={`px-4 py-2 text-xs font-semibold rounded-xl transition-all flex items-center gap-2 ${
-                    activeTab === 'maqna'
-                      ? 'bg-cyan-600 text-white shadow-lg shadow-cyan-900/40'
-                      : 'text-slate-400 hover:text-white'
-                  }`}
-                >
-                  <span className="w-2 h-2 rounded-full bg-cyan-400"></span>
-                  Stock Barang Maqna
-                </button>
-              </div>
-            )}
+              )}
+
+              <button
+                onClick={() => navigate('/maqna')}
+                className={`px-4 py-2 text-xs font-semibold rounded-xl transition-all flex items-center gap-2 ${
+                  activeTab === 'maqna'
+                    ? 'bg-cyan-600 text-white shadow-lg shadow-cyan-900/40'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <span className="w-2 h-2 rounded-full bg-cyan-400"></span>
+                Stock Barang Maqna
+              </button>
+            </div>
 
             <button
               onClick={handleLogout}
