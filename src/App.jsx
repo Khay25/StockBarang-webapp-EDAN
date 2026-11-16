@@ -217,8 +217,8 @@ export default function App() {
       .from('stok_barang')
       .select('*')
       .eq('tipe', tipeFilter)
-      .order('tanggal', { ascending: false })
-      .order('created_at', { ascending: false });
+      .order('tanggal', { ascending: true })
+      .order('created_at', { ascending: true });
 
     if (error) {
       showAlert('Gagal Mengambil Data', error.message, 'danger');
