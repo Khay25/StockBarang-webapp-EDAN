@@ -1,70 +1,29 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { supabase } from './supabaseClient';
-import * as XLSX from 'xlsx';
-import imageCompression from 'browser-image-compression';
-import logoEdan from './logoedan.png';
 import Login from './login';
 import StockMaqna from './StockMaqna';
 
 export default function App() {
   const [session, setSession] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
-  const [userRole, setUserRole] = useState(null);
 
   const location = useLocation();
   const navigate = useNavigate();
 
-  // Tab active: 'masuk', 'keluar', 'audit', atau 'maqna'
-  const activeTab = location.pathname === '/keluar' 
-    ? 'keluar' 
-    : location.pathname === '/audit' 
-    ? 'audit' 
-    : location.pathname === '/maqna'
-    ? 'maqna'
-    : 'masuk';
-
   const [logs, setLogs] = useState([]);
   const [allLogs, setAllLogs] = useState([]);
-  const [auditLogsData, setAuditLogsData] = useState([]);
-  
+  const [auditLogs, setAuditLogs] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [uploading, setUploading] = useState(false);
+
   const [search, setSearch] = useState('');
   const [selectedMonth, setSelectedMonth] = useState('all');
-  
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [onlyPinjam, setOnlyPinjam] = useState(false);
 
-  const [loading, setLoading] = useState(false);
-  const [uploading, setUploading] = useState(false);
-
   const [fileSizeInfo, setFileSizeInfo] = useState({ original: '', compressed: '' });
-
-  const [modal, setModal] = useState({
-    isOpen: false,
-    title: '',
-    message: '',
-    type: 'info',
-    onConfirm: null
-  });
-
-  const [returnModal, setReturnModal] = useState({
-    isOpen: false,
-    log: null,
-    returnDate: new Date().toISOString().split('T')[0]
-  });
-
-  const [editModal, setEditModal] = useState({
-    isOpen: false,
-    id: null,
-    asal: '',
-    sn: '',
-    nama: '',
-    qty: '',
-    tanggal: '',
-    ket: '',
-    foto_url: ''
-  });
 
   const [formData, setFormData] = useState({
     asal: '',
@@ -73,26 +32,81 @@ export default function App() {
     qty: '',
     tanggal: new Date().toISOString().split('T')[0],
     ket: '',
+    foto_url: '',
     status_keluar: 'Keluar Permanen',
-    foto_url: ''
   });
+
+  const [modal, setModal] = useState({
+    isOpen: false,
+    title: '',
+    message: '',
+    type: 'info',
+    onConfirm: null,
+  });
+
+  const [returnModal, setReturnModal] = useState({
+    isOpen: false,
+    log: null,
+    returnDate: new Date().toISOString().split('T')[0],
+  });
+
+  const [editModal, setEditModal] = useState({
+    isOpen: false,
+    id: null,
+    tipe: '',
+    asal: '',
+    sn: '',
+    nama: '',
+    qty: '',
+    tanggal: '',
+    ket: '',
+    foto_url: '',
+  });
+
+  const showAlert = (title, message, type = 'info') => {
+    setModal({ isOpen: true, title, message, type, onConfirm: null });
+  };
+
+  const showConfirm = (title, message, onConfirmCallback) => {
+    setModal({
+      isOpen: true,
+      title,
+      message,
+      type: 'danger',
+      onConfirm: () => {
+        setModal((prev) => ({ ...prev, isOpen: false }));
+        onConfirmCallback();
+      },
+    });
+  };
+
+  const closeModal = () => setModal((prev) => ({ ...prev, isOpen: false }));
+
+  const formatBytes = (bytes) => {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  };
 
   const monthsList = [
     { value: 'all', label: 'Semua Bulan' },
-    { value: '01', label: 'Januari' },
-    { value: '02', label: 'Februari' },
-    { value: '03', label: 'Maret' },
-    { value: '04', label: 'April' },
-    { value: '05', label: 'Mei' },
-    { value: '06', label: 'Juni' },
-    { value: '07', label: 'Juli' },
-    { value: '08', label: 'Agustus' },
-    { value: '09', label: 'September' },
-    { value: '10', label: 'Oktober' },
-    { value: '11', label: 'November' },
-    { value: '12', label: 'Desember' },
+    { value: '0', label: 'Januari' },
+    { value: '1', label: 'Februari' },
+    { value: '2', label: 'Maret' },
+    { value: '3', label: 'April' },
+    { value: '4', label: 'Mei' },
+    { value: '5', label: 'Juni' },
+    { value: '6', label: 'Juli' },
+    { value: '7', label: 'Agustus' },
+    { value: '8', label: 'September' },
+    { value: '9', label: 'Oktober' },
+    { value: '10', label: 'November' },
+    { value: '11', label: 'Desember' },
   ];
 
+  // --- DETEKSI ROLE USER ---
   const getRoleByUser = (user) => {
     if (!user) return null;
     if (user.user_metadata?.role) return user.user_metadata.role;
@@ -107,247 +121,284 @@ export default function App() {
   // --- FUNGSI MENCATAT AUDIT LOG ---
   const recordAudit = async (actionType, detailText) => {
     try {
-      const userEmail = session?.user?.email || 'Unknown User';
+      const userEmail = session?.user?.email || 'Admin / Sistem';
       await supabase.from('audit_logs').insert([
         {
           user_email: userEmail,
           action: actionType,
-          detail: detailText
-        }
+          detail: detailText,
+        },
       ]);
     } catch (err) {
-      console.error("Gagal mencatat audit log:", err);
+      console.error('Gagal mencatat audit:', err);
     }
-  };
-
-  const fetchAuditLogs = async () => {
-    setLoading(true);
-    const { data } = await supabase
-      .from('audit_logs')
-      .select('*')
-      .order('created_at', { ascending: false });
-    
-    if (data) setAuditLogsData(data);
-    setLoading(false);
   };
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
-      if (session) {
-        setUserRole(getRoleByUser(session.user));
-      }
       setAuthLoading(false);
     });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
-      if (session) {
-        setUserRole(getRoleByUser(session.user));
-      }
     });
 
     return () => subscription.unsubscribe();
   }, []);
 
+  const userRole = getRoleByUser(session?.user);
+
+  const activeTab = useMemo(() => {
+    const path = location.pathname.toLowerCase();
+    if (userRole === 'masuk') return 'masuk';
+    if (userRole === 'keluar') return 'keluar';
+
+    if (path.includes('keluar')) return 'keluar';
+    if (path.includes('audit')) return 'audit';
+    if (path.includes('maqna')) return 'maqna';
+    return 'masuk';
+  }, [location.pathname, userRole]);
+
   useEffect(() => {
-    if (session && userRole) {
+    if (!authLoading && session) {
       if (userRole === 'masuk' && location.pathname !== '/masuk') {
         navigate('/masuk', { replace: true });
       } else if (userRole === 'keluar' && location.pathname !== '/keluar') {
         navigate('/keluar', { replace: true });
+      } else if (location.pathname === '/') {
+        navigate('/masuk', { replace: true });
       }
+    }
+  }, [authLoading, session, userRole, location.pathname, navigate]);
 
-      document.title = activeTab === 'masuk' 
-        ? 'Halaman Barang Masuk - EDAN' 
-        : activeTab === 'keluar'
-        ? 'Halaman Barang Keluar - EDAN'
-        : activeTab === 'maqna'
-        ? 'Stock Barang Maqna - EDAN'
-        : 'Audit Log System - EDAN';
-
+  useEffect(() => {
+    if (session) {
+      fetchAllLogsForStock();
       if (activeTab === 'audit') {
         fetchAuditLogs();
       } else if (activeTab === 'masuk' || activeTab === 'keluar') {
         fetchLogs();
       }
-      fetchAllLogsForStock();
+      setSearch('');
+      setSelectedMonth('all');
+      setStartDate('');
+      setEndDate('');
+      setOnlyPinjam(false);
+      setFileSizeInfo({ original: '', compressed: '' });
     }
-  }, [activeTab, session, userRole, location.pathname]);
+  }, [activeTab, session]);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
   };
 
-  const showAlert = (title, message, type = 'info') => {
-    setModal({ isOpen: true, title, message, type, onConfirm: null });
-  };
+  const fetchAllLogsForStock = async () => {
+    const { data, error } = await supabase
+      .from('stok_barang')
+      .select('*')
+      .order('tanggal', { ascending: false });
 
-  const showConfirm = (title, message, onConfirm) => {
-    setModal({ isOpen: true, title, message, type: 'danger', onConfirm });
-  };
-
-  const closeModal = () => {
-    setModal({ isOpen: false, title: '', message: '', type: 'info', onConfirm: null });
+    if (!error) {
+      setAllLogs(data || []);
+    }
   };
 
   const fetchLogs = async () => {
     setLoading(true);
+    const tipeFilter = activeTab === 'masuk' ? 'Barang Masuk' : 'Barang Keluar';
+
     const { data, error } = await supabase
       .from('stok_barang')
       .select('*')
-      .eq('tipe', activeTab === 'masuk' ? 'Barang Masuk' : 'Barang Keluar')
-      .order('tanggal', { ascending: true });
+      .eq('tipe', tipeFilter)
+      .order('tanggal', { ascending: false })
+      .order('created_at', { ascending: false });
 
-    if (!error) setLogs(data || []);
+    if (error) {
+      showAlert('Gagal Mengambil Data', error.message, 'danger');
+    } else {
+      setLogs(data || []);
+    }
     setLoading(false);
   };
 
-  const fetchAllLogsForStock = async () => {
-    const { data } = await supabase.from('stok_barang').select('*');
-    if (data) setAllLogs(data);
+  const fetchAuditLogs = async () => {
+    setLoading(true);
+    const { data, error } = await supabase
+      .from('audit_logs')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(200);
+
+    if (error) {
+      console.error('Error fetch audit:', error);
+    } else {
+      setAuditLogs(data || []);
+    }
+    setLoading(false);
   };
 
-  const getSisaStokByNama = (namaBarang) => {
-    if (!namaBarang) return 0;
-    const cleanNama = namaBarang.trim().toLowerCase();
+  const compressImage = (file, maxWidth = 1000, quality = 0.7) => {
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = (event) => {
+        const img = new Image();
+        img.src = event.target.result;
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          let width = img.width;
+          let height = img.height;
 
-    const totalMasuk = allLogs
-      .filter(item => item.tipe === 'Barang Masuk' && item.nama?.trim().toLowerCase() === cleanNama)
-      .reduce((acc, curr) => acc + (parseInt(curr.qty) || 0), 0);
+          if (width > maxWidth) {
+            height = Math.round((height * maxWidth) / width);
+            width = maxWidth;
+          }
 
-    const totalKeluar = allLogs
-      .filter(item => item.tipe === 'Barang Keluar' && item.nama?.trim().toLowerCase() === cleanNama)
-      .reduce((acc, curr) => acc + (parseInt(curr.qty) || 0), 0);
+          canvas.width = width;
+          canvas.height = height;
 
-    return totalMasuk - totalKeluar;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, width, height);
+
+          canvas.toBlob(
+            (blob) => {
+              resolve(blob);
+            },
+            'image/jpeg',
+            quality
+          );
+        };
+      };
+    });
   };
 
-  // Stat Cards Dashboard
-  const currentMonthNum = new Date().toISOString().split('-')[1];
-
-  const totalJenisBarang = Array.from(new Set(allLogs.map(item => item.nama?.trim().toLowerCase()).filter(Boolean))).length;
-
-  const totalMasukBulanIni = allLogs
-    .filter(item => item.tipe === 'Barang Masuk' && item.tanggal?.split('-')[1] === currentMonthNum)
-    .reduce((acc, curr) => acc + (parseInt(curr.qty) || 0), 0);
-
-  const totalKeluarBulanIni = allLogs
-    .filter(item => item.tipe === 'Barang Keluar' && item.tanggal?.split('-')[1] === currentMonthNum)
-    .reduce((acc, curr) => acc + (parseInt(curr.qty) || 0), 0);
-
-  const totalDipinjam = allLogs
-    .filter(item => item.tipe === 'Barang Keluar' && item.ket?.includes('[DIPINJAM]'))
-    .reduce((acc, curr) => acc + (parseInt(curr.qty) || 0), 0);
-
-  const totalDikembalikan = allLogs
-    .filter(item => item.tipe === 'Barang Masuk' && item.asal?.includes('Pengembalian Pinjaman'))
-    .reduce((acc, curr) => acc + (parseInt(curr.qty) || 0), 0);
-
-  const sisaSedangDipinjam = Math.max(0, totalDipinjam - totalDikembalikan);
-
-  const handleFileUpload = async (e, isEditMode = false) => {
+  const handleFileUpload = async (e, isEdit = false) => {
     const file = e.target.files[0];
     if (!file) return;
 
     setUploading(true);
 
-    const origMB = (file.size / 1024 / 1024).toFixed(2);
-    const origKB = (file.size / 1024).toFixed(0);
-    const originalSizeText = file.size >= 1024 * 1024 ? `${origMB} MB` : `${origKB} KB`;
-
-    setFileSizeInfo({ original: originalSizeText, compressed: '' });
-
-    const options = {
-      maxSizeMB: 0.2,
-      maxWidthOrHeight: 1200,
-      useWebWorker: true,
-    };
+    if (!isEdit) {
+      setFileSizeInfo({ original: formatBytes(file.size), compressed: 'Mengompres...' });
+    }
 
     try {
-      const compressedFile = await imageCompression(file, options);
-
-      const compMB = (compressedFile.size / 1024 / 1024).toFixed(2);
-      const compKB = (compressedFile.size / 1024).toFixed(0);
-      const compressedSizeText = compressedFile.size >= 1024 * 1024 ? `${compMB} MB` : `${compKB} KB`;
-
-      setFileSizeInfo({ original: originalSizeText, compressed: compressedSizeText });
-      
-      const fileExt = file.name.split('.').pop();
-      const fileName = `${Math.random()}.${fileExt}`;
+      const compressedBlob = await compressImage(file, 1000, 0.7);
+      const fileName = `${Date.now()}.jpg`;
       const filePath = `${fileName}`;
 
       const { error: uploadError } = await supabase.storage
-        .from('foto_barang')
-        .upload(filePath, compressedFile);
+        .from('foto-barang')
+        .upload(filePath, compressedBlob, {
+          contentType: 'image/jpeg',
+        });
 
       if (uploadError) {
-        showAlert('Gagal Upload', 'Gagal upload foto: ' + uploadError.message, 'danger');
-      } else {
-        const { data } = supabase.storage
-          .from('foto_barang')
-          .getPublicUrl(filePath);
-        
-        if (isEditMode) {
-          setEditModal(prev => ({ ...prev, foto_url: data.publicUrl }));
-        } else {
-          setFormData(prev => ({ ...prev, foto_url: data.publicUrl }));
-        }
+        showAlert('Gagal Upload Foto', uploadError.message, 'danger');
+        setUploading(false);
+        return;
       }
-    } catch (error) {
-      showAlert('Gagal Kompres', 'Error saat mengompres foto: ' + error.message, 'danger');
-    } finally {
-      setUploading(false);
+
+      const { data: publicUrlData } = supabase.storage
+        .from('foto-barang')
+        .getPublicUrl(filePath);
+
+      if (isEdit) {
+        setEditModal((prev) => ({ ...prev, foto_url: publicUrlData.publicUrl }));
+      } else {
+        setFileSizeInfo({
+          original: formatBytes(file.size),
+          compressed: formatBytes(compressedBlob.size),
+        });
+        setFormData((prev) => ({ ...prev, foto_url: publicUrlData.publicUrl }));
+      }
+    } catch (err) {
+      showAlert('Terjadi Kesalahan', err.message, 'danger');
     }
+
+    setUploading(false);
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (userRole === 'viewer') return;
+
     if (!formData.nama || !formData.qty) {
-      showAlert('Peringatan', 'Nama barang dan Quantity wajib diisi!', 'danger');
+      showAlert('Data Belum Lengkap', 'Nama Barang dan Quantity wajib diisi!', 'danger');
       return;
     }
 
-    const inputQty = parseInt(formData.qty);
+    const inputQty = parseInt(formData.qty, 10) || 0;
 
     if (activeTab === 'keluar') {
-      const sisaStokSaatIni = getSisaStokByNama(formData.nama);
-      if (inputQty > sisaStokSaatIni) {
+      const targetName = formData.nama.trim().toLowerCase();
+
+      const totalMasuk = allLogs
+        .filter(
+          (item) =>
+            item.tipe === 'Barang Masuk' &&
+            item.nama?.trim().toLowerCase() === targetName
+        )
+        .reduce((sum, item) => sum + (Number(item.qty) || 0), 0);
+
+      const totalKeluar = allLogs
+        .filter(
+          (item) =>
+            item.tipe === 'Barang Keluar' &&
+            item.nama?.trim().toLowerCase() === targetName
+        )
+        .reduce((sum, item) => sum + (Number(item.qty) || 0), 0);
+
+      const sisaStok = totalMasuk - totalKeluar;
+
+      if (sisaStok <= 0) {
         showAlert(
-          'Stok Tidak Cukup', 
-          `Gagal mengeluarkan barang! Sisa stok real "${formData.nama}" saat ini hanya: ${sisaStokSaatIni} unit`, 
+          'Stok Tidak Tersedia!',
+          `Barang "${formData.nama}" tidak ada di gudang atau stok saat ini 0 unit.`,
+          'danger'
+        );
+        return;
+      }
+
+      if (inputQty > sisaStok) {
+        showAlert(
+          'Stok Tidak Mencukupi!',
+          `Stok "${formData.nama}" yang tersedia di gudang hanya ${sisaStok} Unit. Tidak bisa mengeluarkan ${inputQty} Unit.`,
           'danger'
         );
         return;
       }
     }
 
-    const fullKet = activeTab === 'keluar' && formData.status_keluar === 'Pinjam'
-      ? `[DIPINJAM] ${formData.ket}`
-      : formData.ket;
+    let finalKet = formData.ket;
+    if (activeTab === 'keluar' && formData.status_keluar === 'Pinjam') {
+      finalKet = `[DIPINJAM] ${formData.ket}`.trim();
+    }
 
-    const tipeLabel = activeTab === 'masuk' ? 'Barang Masuk' : 'Barang Keluar';
-
-    const payload = {
-      tipe: tipeLabel,
+    const newEntry = {
+      tipe: activeTab === 'masuk' ? 'Barang Masuk' : 'Barang Keluar',
       asal: formData.asal,
       sn: formData.sn,
       nama: formData.nama,
       qty: inputQty,
       tanggal: formData.tanggal,
-      ket: fullKet,
-      foto_url: formData.foto_url
+      ket: finalKet,
+      foto_url: formData.foto_url,
     };
 
-    const { error } = await supabase.from('stok_barang').insert([payload]);
+    const { error } = await supabase.from('stok_barang').insert([newEntry]);
 
     if (error) {
-      showAlert('Gagal Simpan', 'Gagal menyimpan data: ' + error.message, 'danger');
+      showAlert('Gagal Menyimpan', error.message, 'danger');
     } else {
-      showAlert('Berhasil!', `Data ${tipeLabel} sukses tersimpan.`, 'info');
-      
-      // CATAT KE AUDIT LOG
-      await recordAudit('TAMBAH', `Menambahkan ${tipeLabel}: "${formData.nama}" (${inputQty} Unit)`);
+      await recordAudit(
+        'TAMBAH',
+        `Menambah ${newEntry.tipe}: "${newEntry.nama}" sebanyak ${newEntry.qty} Unit (Asal/SJ: ${newEntry.asal || '-'})`
+      );
 
       setFormData({
         asal: '',
@@ -356,12 +407,17 @@ export default function App() {
         qty: '',
         tanggal: new Date().toISOString().split('T')[0],
         ket: '',
+        foto_url: '',
         status_keluar: 'Keluar Permanen',
-        foto_url: ''
       });
       setFileSizeInfo({ original: '', compressed: '' });
       fetchLogs();
       fetchAllLogsForStock();
+      showAlert(
+        'Berhasil Disimpan',
+        `Data "${newEntry.nama}" berhasil ditambahkan ke sistem.`,
+        'success'
+      );
     }
   };
 
@@ -369,53 +425,50 @@ export default function App() {
     setEditModal({
       isOpen: true,
       id: log.id,
+      tipe: log.tipe,
       asal: log.asal || '',
       sn: log.sn || '',
       nama: log.nama || '',
-      qty: log.qty || '',
-      tanggal: log.tanggal || '',
+      qty: log.qty || 0,
+      tanggal: log.tanggal || new Date().toISOString().split('T')[0],
       ket: log.ket || '',
       foto_url: log.foto_url || '',
-      originalLog: log
     });
   };
 
   const handleSaveEdit = async () => {
     if (!editModal.nama || !editModal.qty) {
-      showAlert('Peringatan', 'Nama Barang dan Quantity tidak boleh kosong!', 'danger');
+      showAlert('Gagal', 'Nama barang dan quantity wajib diisi!', 'danger');
       return;
     }
 
-    const payload = {
+    const updatedData = {
       asal: editModal.asal,
       sn: editModal.sn,
       nama: editModal.nama,
-      qty: parseInt(editModal.qty),
+      qty: parseInt(editModal.qty, 10) || 0,
       tanggal: editModal.tanggal,
       ket: editModal.ket,
-      foto_url: editModal.foto_url
+      foto_url: editModal.foto_url,
     };
 
     const { error } = await supabase
       .from('stok_barang')
-      .update(payload)
+      .update(updatedData)
       .eq('id', editModal.id);
 
     if (error) {
-      showAlert('Gagal Update', 'Error saat memperbarui data: ' + error.message, 'danger');
+      showAlert('Gagal Edit Data', error.message, 'danger');
     } else {
-      showAlert('Berhasil!', 'Data transaksi berhasil diperbarui.', 'info');
-      
-      // CATAT KE AUDIT LOG
-      const oldLog = editModal.originalLog;
       await recordAudit(
-        'EDIT', 
-        `Mengubah Transaksi #${editModal.id} ("${oldLog.nama}") | Qty: ${oldLog.qty}➔${editModal.qty}, Tanggal: ${oldLog.tanggal}➔${editModal.tanggal}`
+        'EDIT',
+        `Mengedit ${editModal.tipe} #${editModal.id}: "${updatedData.nama}" (${updatedData.qty} Unit)`
       );
 
-      setEditModal({ isOpen: false, id: null, asal: '', sn: '', nama: '', qty: '', tanggal: '', ket: '', foto_url: '' });
+      setEditModal({ ...editModal, isOpen: false });
       fetchLogs();
       fetchAllLogsForStock();
+      showAlert('Berhasil Diedit', 'Data transaksi telah diperbarui!', 'success');
     }
   };
 
@@ -423,258 +476,462 @@ export default function App() {
     setReturnModal({
       isOpen: true,
       log: log,
-      returnDate: new Date().toISOString().split('T')[0]
+      returnDate: new Date().toISOString().split('T')[0],
     });
   };
 
   const handleConfirmReturn = async () => {
-    const { log, returnDate } = returnModal;
+    const log = returnModal.log;
+    const tglKembali = returnModal.returnDate;
     if (!log) return;
 
-    const payload = {
-      tipe: 'Barang Masuk',
-      asal: `Pengembalian Pinjaman (${log.asal || 'Tanpa SJ'})`,
-      sn: log.sn,
-      nama: log.nama,
-      qty: parseInt(log.qty),
-      tanggal: returnDate,
-      ket: `[DIKEMBALIKAN] Pinjaman tgl ${log.tanggal}`,
-      foto_url: log.foto_url
-    };
+    const cleanKet = (log.ket || '').replace('[DIPINJAM]', '').trim();
+    const updatedKet = `[DIKEMBALIKAN: ${tglKembali}] ${cleanKet}`.trim();
 
-    const { error } = await supabase.from('stok_barang').insert([payload]);
+    const { error: updateError } = await supabase
+      .from('stok_barang')
+      .update({ ket: updatedKet })
+      .eq('id', log.id);
 
-    if (error) {
-      showAlert('Gagal', 'Gagal memproses pengembalian: ' + error.message, 'danger');
-    } else {
-      showAlert('Berhasil!', `Stok "${log.nama}" (${log.qty} unit) berhasil dikembalikan pada tanggal ${returnDate}.`, 'info');
-      
-      // CATAT KE AUDIT LOG
-      await recordAudit('PENGEMBALIAN', `Memproses pengembalian pinjaman: "${log.nama}" (${log.qty} Unit)`);
-
-      fetchLogs();
-      fetchAllLogsForStock();
+    if (updateError) {
+      showAlert('Gagal Update Status', updateError.message, 'danger');
+      return;
     }
 
-    setReturnModal({ isOpen: false, log: null, returnDate: new Date().toISOString().split('T')[0] });
+    const returnEntry = {
+      tipe: 'Barang Masuk',
+      asal: `Pengembalian Pinjaman (${log.asal || '-'})`,
+      sn: log.sn,
+      nama: log.nama,
+      qty: parseInt(log.qty, 10) || 0,
+      tanggal: tglKembali,
+      ket: `Pengembalian barang dipinjam tgl ${log.tanggal}`,
+      foto_url: log.foto_url || '',
+    };
+
+    const { error: insertError } = await supabase
+      .from('stok_barang')
+      .insert([returnEntry]);
+
+    if (insertError) {
+      showAlert('Gagal Catat Barang Masuk', insertError.message, 'danger');
+    } else {
+      await recordAudit(
+        'KEMBALIKAN',
+        `Barang Pinjaman Dikembalikan: "${log.nama}" sebanyak ${log.qty} Unit (Tgl Kembali: ${tglKembali})`
+      );
+
+      setReturnModal({
+        isOpen: false,
+        log: null,
+        returnDate: new Date().toISOString().split('T')[0],
+      });
+      fetchLogs();
+      fetchAllLogsForStock();
+      showAlert(
+        'Barang Dikembalikan!',
+        `Stok "${log.nama}" sebanyak ${log.qty} unit telah kembali ke gudang pada tanggal ${tglKembali}.`,
+        'success'
+      );
+    }
+  };
+
+  const handleDelete = (log) => {
+    showConfirm(
+      'Hapus Riwayat?',
+      `Yakin ingin menghapus data "${log.nama}"? Data yang dihapus tidak bisa dikembalikan.`,
+      async () => {
+        const { error } = await supabase
+          .from('stok_barang')
+          .delete()
+          .eq('id', log.id);
+
+        if (error) {
+          showAlert('Gagal Menghapus', error.message, 'danger');
+        } else {
+          await recordAudit(
+            'HAPUS',
+            `Menghapus ${log.tipe}: "${log.nama}" (${log.qty} Unit, SN: ${log.sn || '-'})`
+          );
+
+          fetchLogs();
+          fetchAllLogsForStock();
+          showAlert('Terhapus', 'Data transaksi berhasil dihapus.', 'success');
+        }
+      }
+    );
   };
 
   const handlePrintPDF = (log) => {
     const printWindow = window.open('', '_blank');
-    const content = `
-      <!DOCTYPE html>
+    const isPinjam = log.ket?.includes('[DIPINJAM]');
+    const badgeText =
+      log.tipe === 'Barang Masuk'
+        ? 'BUKTI BARANG MASUK'
+        : isPinjam
+        ? 'SURAT PEMINJAMAN BARANG'
+        : 'BUKTI BARANG KELUAR';
+    const badgeColor =
+      log.tipe === 'Barang Masuk' ? '#059669' : isPinjam ? '#d97706' : '#e11d48';
+
+    printWindow.document.write(`
       <html>
-      <head>
-        <title>Bukti Transaksi EDAN #${log.id}</title>
-        <style>
-          body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 40px; color: #1e293b; background: #fff; }
-          .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 3px solid #059669; padding-bottom: 20px; }
-          .title { font-size: 26px; font-weight: 800; color: #0f172a; letter-spacing: -0.5px; }
-          .subtitle { font-size: 13px; color: #64748b; margin-top: 4px; }
-          .badge { display: inline-block; padding: 6px 14px; border-radius: 20px; font-weight: bold; font-size: 12px; text-transform: uppercase; background: ${log.tipe === 'Barang Masuk' ? '#d1fae5' : '#ffe4e6'}; color: ${log.tipe === 'Barang Masuk' ? '#047857' : '#be123c'}; }
-          .details-table { width: 100%; border-collapse: collapse; margin-top: 30px; }
-          .details-table th, .details-table td { padding: 12px 16px; border: 1px solid #cbd5e1; text-align: left; font-size: 14px; }
-          .details-table th { background-color: #f8fafc; font-weight: 600; width: 30%; }
-          .signature-container { margin-top: 70px; display: flex; justify-content: space-between; padding: 0 40px; }
-          .signature-box { text-align: center; width: 220px; }
-          .signature-line { margin-top: 80px; border-bottom: 1.5px solid #475569; }
-        </style>
-      </head>
-      <body>
-        <div class="header">
-          <div>
-            <div class="title">STOCK BARANG <span style="color:#059669">EDAN</span></div>
-            <div class="subtitle">Dokumen Resmi Bukti Transaksi Gudang</div>
+        <head>
+          <title>${badgeText} - ${log.nama}</title>
+          <style>
+            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 40px; color: #1e293b; }
+            .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #cbd5e1; padding-bottom: 20px; margin-bottom: 30px; }
+            .logo { font-size: 24px; font-weight: bold; color: #0f172a; }
+            .badge { background-color: ${badgeColor}; color: white; padding: 6px 14px; border-radius: 6px; font-weight: bold; font-size: 13px; letter-spacing: 1px; }
+            .info-table { width: 100%; border-collapse: collapse; margin-bottom: 30px; }
+            .info-table td { padding: 12px; border: 1px solid #cbd5e1; font-size: 14px; }
+            .info-label { font-weight: bold; background-color: #f8fafc; width: 30%; color: #475569; }
+            .signatures { display: flex; justify-content: space-between; margin-top: 60px; text-align: center; }
+            .sig-box { width: 200px; }
+            .sig-line { border-bottom: 1px solid #1e293b; height: 70px; margin-bottom: 8px; }
+            .footer { margin-top: 50px; font-size: 11px; color: #94a3b8; text-align: center; border-top: 1px dashed #cbd5e1; padding-top: 10px; }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <div>
+              <div class="logo">PT. EDAN INDONESIA</div>
+              <div style="font-size: 12px; color: #64748b; margin-top: 4px;">Sistem Manajemen Inventaris & Gudang</div>
+            </div>
+            <div class="badge">${badgeText}</div>
           </div>
-          <div>
-            <span class="badge">${log.tipe}</span>
-          </div>
-        </div>
 
-        <table class="details-table">
-          <tr><th>ID Transaksi</th><td>#${log.id}</td></tr>
-          <tr><th>Tanggal Transaksi</th><td>${log.tanggal}</td></tr>
-          <tr><th>Surat Jalan / Asal</th><td>${log.asal || '-'}</td></tr>
-          <tr><th>Serial Number (SN)</th><td>${log.sn || '-'}</td></tr>
-          <tr><th>Nama Barang</th><td><strong>${log.nama}</strong></td></tr>
-          <tr><th>Jumlah (QTY)</th><td><strong>${log.qty} Unit</strong></td></tr>
-          <tr><th>Keterangan</th><td>${log.ket || '-'}</td></tr>
-        </table>
+          <table class="info-table">
+            <tr>
+              <td class="info-label">Nomor Dokumen / ID</td>
+              <td>#TRX-${log.id}</td>
+            </tr>
+            <tr>
+              <td class="info-label">Tanggal Transaksi</td>
+              <td>${log.tanggal}</td>
+            </tr>
+            <tr>
+              <td class="info-label">Surat Jalan / Asal / Tujuan</td>
+              <td>${log.asal || '-'}</td>
+            </tr>
+            <tr>
+              <td class="info-label">Nama Barang</td>
+              <td><strong>${log.nama}</strong></td>
+            </tr>
+            <tr>
+              <td class="info-label">Serial Number (SN)</td>
+              <td style="font-family: monospace;">${log.sn || '-'}</td>
+            </tr>
+            <tr>
+              <td class="info-label">Jumlah (Quantity)</td>
+              <td><strong>${log.qty} Unit</strong></td>
+            </tr>
+            <tr>
+              <td class="info-label">Keterangan / Catatan</td>
+              <td>${log.ket || '-'}</td>
+            </tr>
+          </table>
 
-        <div class="signature-container">
-          <div class="signature-box">
-            <p style="font-weight:600; font-size:13px;">Petugas Gudang</p>
-            <div class="signature-line"></div>
+          <div class="signatures">
+            <div class="sig-box">
+              <div>Diserahkan Oleh,</div>
+              <div class="sig-line"></div>
+              <div>( Admin Gudang )</div>
+            </div>
+            <div class="sig-box">
+              <div>Mengetahui,</div>
+              <div class="sig-line"></div>
+              <div>( Kepala Logistik )</div>
+            </div>
+            <div class="sig-box">
+              <div>Diterima Oleh,</div>
+              <div class="sig-line"></div>
+              <div>( Penerima / Peminjam )</div>
+            </div>
           </div>
-          <div class="signature-box">
-            <p style="font-weight:600; font-size:13px;">Penerima / Penanggung Jawab</p>
-            <div class="signature-line"></div>
-          </div>
-        </div>
 
-        <script>
-          window.onload = function() {
-            window.print();
-            window.onafterprint = function() { window.close(); };
-          };
-        </script>
-      </body>
+          <div class="footer">
+            Dokumen ini dicetak secara otomatis dari sistem EDAN Stock App pada ${new Date().toLocaleString('id-ID')}
+          </div>
+
+          <script>
+            window.onload = function() { window.print(); }
+          </script>
+        </body>
       </html>
-    `;
-
-    printWindow.document.write(content);
+    `);
     printWindow.document.close();
   };
 
-  const handleDelete = (log) => {
-    showConfirm('Konfirmasi Hapus', `Apakah kamu yakin ingin menghapus data "${log.nama}"?`, async () => {
-      const { error } = await supabase.from('stok_barang').delete().eq('id', log.id);
-      if (!error) {
-        // CATAT KE AUDIT LOG
-        await recordAudit('HAPUS', `Menghapus Transaksi #${log.id} ("${log.nama}" - ${log.qty} Unit)`);
+  const filteredLogs = useMemo(() => {
+    return logs.filter((log) => {
+      const matchSearch =
+        log.nama?.toLowerCase().includes(search.toLowerCase()) ||
+        log.sn?.toLowerCase().includes(search.toLowerCase()) ||
+        log.asal?.toLowerCase().includes(search.toLowerCase());
 
-        fetchLogs();
-        fetchAllLogsForStock();
+      let matchMonth = true;
+      if (selectedMonth !== 'all' && log.tanggal) {
+        const logMonth = new Date(log.tanggal).getMonth().toString();
+        matchMonth = logMonth === selectedMonth;
       }
-      closeModal();
+
+      let matchDateRange = true;
+      if (startDate && log.tanggal) {
+        matchDateRange = matchDateRange && log.tanggal >= startDate;
+      }
+      if (endDate && log.tanggal) {
+        matchDateRange = matchDateRange && log.tanggal <= endDate;
+      }
+
+      let matchPinjam = true;
+      if (activeTab === 'keluar' && onlyPinjam) {
+        matchPinjam = log.ket?.includes('[DIPINJAM]');
+      }
+
+      return matchSearch && matchMonth && matchDateRange && matchPinjam;
     });
+  }, [logs, search, selectedMonth, startDate, endDate, activeTab, onlyPinjam]);
+
+  const filteredAuditLogs = useMemo(() => {
+    return auditLogs.filter((a) => {
+      const matchSearch =
+        a.detail?.toLowerCase().includes(search.toLowerCase()) ||
+        a.user_email?.toLowerCase().includes(search.toLowerCase()) ||
+        a.action?.toLowerCase().includes(search.toLowerCase());
+
+      let matchDateRange = true;
+      if (startDate && a.created_at) {
+        const auditDate = new Date(a.created_at).toISOString().split('T')[0];
+        matchDateRange = matchDateRange && auditDate >= startDate;
+      }
+      if (endDate && a.created_at) {
+        const auditDate = new Date(a.created_at).toISOString().split('T')[0];
+        matchDateRange = matchDateRange && auditDate <= endDate;
+      }
+
+      return matchSearch && matchDateRange;
+    });
+  }, [auditLogs, search, startDate, endDate]);
+
+  const handleExportExcel = () => {
+    if (filteredLogs.length === 0) {
+      showAlert('Data Kosong', 'Tidak ada data untuk diexport ke Excel.', 'danger');
+      return;
+    }
+
+    const headers = [
+      'No',
+      'Tipe Transaksi',
+      'Asal / Surat Jalan',
+      'Serial Number (SN)',
+      'Nama Barang',
+      'Quantity',
+      'Tanggal',
+      'Jam Input',
+      'Keterangan',
+    ];
+    const rows = filteredLogs.map((log, index) => {
+      const jamInput = log.created_at
+        ? new Date(log.created_at).toLocaleTimeString('id-ID', {
+            hour: '2-digit',
+            minute: '2-digit',
+          }) + ' WIB'
+        : '-';
+      return [
+        index + 1,
+        `"${log.tipe}"`,
+        `"${(log.asal || '-').replace(/"/g, '""')}"`,
+        `"${(log.sn || '-').replace(/"/g, '""')}"`,
+        `"${(log.nama || '-').replace(/"/g, '""')}"`,
+        log.qty || 0,
+        `"${log.tanggal || '-'}"`,
+        `"${jamInput}"`,
+        `"${(log.ket || '-').replace(/"/g, '""')}"`,
+      ];
+    });
+
+    const csvContent =
+      'data:text/csv;charset=utf-8,' +
+      [headers.join(','), ...rows.map((e) => e.join(','))].join('\n');
+
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement('a');
+    link.setAttribute('href', encodedUri);
+
+    const fileName = `Laporan_${activeTab === 'masuk' ? 'Barang_Masuk' : 'Barang_Keluar'}_${
+      new Date().toISOString().split('T')[0]
+    }.csv`;
+    link.setAttribute('download', fileName);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+
+    recordAudit(
+      'EXPORT',
+      `Mengunduh laporan Excel (${fileName}) berisi ${filteredLogs.length} baris data.`
+    );
   };
+
+  const searchedItemName = useMemo(() => {
+    const keyword = search.trim();
+    if (!keyword || filteredLogs.length === 0) return null;
+
+    const firstMatchedName = filteredLogs[0].nama;
+    const isConsistent = filteredLogs.every(
+      (item) =>
+        item.nama?.trim().toLowerCase() === firstMatchedName?.trim().toLowerCase()
+    );
+
+    return isConsistent ? firstMatchedName : null;
+  }, [search, filteredLogs]);
+
+  const currentSearchedStock = useMemo(() => {
+    if (!searchedItemName) return 0;
+    const targetName = searchedItemName.trim().toLowerCase();
+
+    const totalMasuk = allLogs
+      .filter(
+        (item) =>
+          item.tipe === 'Barang Masuk' &&
+          item.nama?.trim().toLowerCase() === targetName
+      )
+      .reduce((sum, item) => sum + (Number(item.qty) || 0), 0);
+
+    const totalKeluar = allLogs
+      .filter(
+        (item) =>
+          item.tipe === 'Barang Keluar' &&
+          item.nama?.trim().toLowerCase() === targetName
+      )
+      .reduce((sum, item) => sum + (Number(item.qty) || 0), 0);
+
+    return totalMasuk - totalKeluar;
+  }, [searchedItemName, allLogs]);
+
+  const groupedLogs = useMemo(() => {
+    const groups = {};
+    filteredLogs.forEach((log) => {
+      if (!log.tanggal) return;
+      const dateObj = new Date(log.tanggal);
+      const monthYear = dateObj.toLocaleDateString('id-ID', {
+        month: 'long',
+        year: 'numeric',
+      });
+
+      if (!groups[monthYear]) {
+        groups[monthYear] = [];
+      }
+      groups[monthYear].push(log);
+    });
+    return groups;
+  }, [filteredLogs]);
+
+  const currentMonth = new Date().getMonth();
+  const currentYear = new Date().getFullYear();
+
+  const totalMasukBulanIni = useMemo(() => {
+    return allLogs
+      .filter(
+        (item) =>
+          item.tipe === 'Barang Masuk' &&
+          new Date(item.tanggal).getMonth() === currentMonth &&
+          new Date(item.tanggal).getFullYear() === currentYear
+      )
+      .reduce((sum, item) => sum + (Number(item.qty) || 0), 0);
+  }, [allLogs, currentMonth, currentYear]);
+
+  const totalKeluarBulanIni = useMemo(() => {
+    return allLogs
+      .filter(
+        (item) =>
+          item.tipe === 'Barang Keluar' &&
+          new Date(item.tanggal).getMonth() === currentMonth &&
+          new Date(item.tanggal).getFullYear() === currentYear
+      )
+      .reduce((sum, item) => sum + (Number(item.qty) || 0), 0);
+  }, [allLogs, currentMonth, currentYear]);
+
+  const totalJenisBarang = useMemo(() => {
+    const uniqueNames = new Set(
+      allLogs.map((item) => item.nama?.trim().toLowerCase()).filter(Boolean)
+    );
+    return uniqueNames.size;
+  }, [allLogs]);
+
+  const sisaSedangDipinjam = useMemo(() => {
+    return allLogs
+      .filter(
+        (item) => item.tipe === 'Barang Keluar' && item.ket?.includes('[DIPINJAM]')
+      )
+      .reduce((sum, item) => sum + (Number(item.qty) || 0), 0);
+  }, [allLogs]);
 
   const handleResetDateRange = () => {
     setStartDate('');
     setEndDate('');
   };
 
-  const handleExportExcel = () => {
-    if (filteredLogs.length === 0) {
-      showAlert('Export Gagal', 'Tidak ada data untuk di-export!', 'danger');
-      return;
-    }
-
-    const excelData = filteredLogs.map((log, index) => ({
-      'No': index + 1,
-      'Tipe Transaksi': log.tipe,
-      'Surat Jalan / Asal': log.asal || '-',
-      'Serial Number (SN)': log.sn || '-',
-      'Nama Barang': log.nama || '-',
-      [activeTab === 'masuk' ? 'QTY Masuk' : 'QTY Keluar']: log.qty || 0,
-      'Tanggal Transaksi': log.tanggal || '-',
-      'Jam Input': log.created_at ? new Date(log.created_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WIB' : '-',
-      'Keterangan': log.ket || '-'
-    }));
-
-    const worksheet = XLSX.utils.json_to_sheet(excelData);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, activeTab === 'masuk' ? 'Barang Masuk' : 'Barang Keluar');
-
-    worksheet['!cols'] = [
-      { wch: 6 },
-      { wch: 18 },
-      { wch: 20 },
-      { wch: 20 },
-      { wch: 30 },
-      { wch: 15 },
-      { wch: 18 },
-      { wch: 15 },
-      { wch: 35 }
-    ];
-
-    const fileName = `Laporan_${activeTab === 'masuk' ? 'Barang_Masuk' : 'Barang_Keluar'}_EDAN_${new Date().toISOString().split('T')[0]}.xlsx`;
-    XLSX.writeFile(workbook, fileName);
-  };
-
   if (authLoading) {
     return (
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center text-slate-400 text-sm">
+      <div className="min-h-screen bg-[#0b0f19] flex items-center justify-center text-slate-400">
         Memeriksa sesi login...
       </div>
     );
   }
 
   if (!session) {
-    return <Login onLoginSuccess={(sess) => setSession(sess)} />;
+    return <Login onLoginSuccess={(newSession) => setSession(newSession)} />;
   }
 
-  const filteredLogs = logs.filter(log => {
-    const matchesSearch =
-      log.nama?.toLowerCase().includes(search.toLowerCase()) ||
-      log.sn?.toLowerCase().includes(search.toLowerCase()) ||
-      log.asal?.toLowerCase().includes(search.toLowerCase()) ||
-      log.ket?.toLowerCase().includes(search.toLowerCase());
-
-    const logMonth = log.tanggal ? log.tanggal.split('-')[1] : '';
-    const matchesMonth = selectedMonth === 'all' || logMonth === selectedMonth;
-
-    let matchesDateRange = true;
-    if (startDate && endDate) {
-      matchesDateRange = log.tanggal >= startDate && log.tanggal <= endDate;
-    } else if (startDate) {
-      matchesDateRange = log.tanggal >= startDate;
-    } else if (endDate) {
-      matchesDateRange = log.tanggal <= endDate;
-    }
-
-    const matchesPinjam = onlyPinjam ? log.ket?.includes('[DIPINJAM]') : true;
-
-    return matchesSearch && matchesMonth && matchesDateRange && matchesPinjam;
-  });
-
-  const sortedMonths = monthsList.filter(m => m.value !== 'all');
-  const groupedLogs = sortedMonths.reduce((acc, monthObj) => {
-    const itemsInMonth = filteredLogs
-      .filter(log => log.tanggal && log.tanggal.split('-')[1] === monthObj.value)
-      .sort((a, b) => new Date(a.tanggal) - new Date(b.tanggal));
-
-    if (itemsInMonth.length > 0) {
-      acc[monthObj.label] = itemsInMonth;
-    }
-    return acc;
-  }, {});
-
-  const searchedItemName = search.trim();
-  const currentSearchedStock = searchedItemName ? getSisaStokByNama(searchedItemName) : null;
-
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 p-4 md:p-8 font-sans relative">
+    <div className="min-h-screen bg-[#0b0f19] text-slate-100 p-4 md:p-8 font-sans">
       <div className="max-w-7xl mx-auto space-y-8">
-        
-        {/* Header Navigation */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 pb-6">
-          <div className="flex items-center gap-3">
-            <img 
-              src={logoEdan} 
-              alt="Logo EDAN" 
-              className="w-10 h-10 object-contain rounded-xl"
+        {/* Header & Navigation */}
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-slate-800 pb-6">
+          <div className="flex items-center gap-4">
+            <img
+              src="/logoedan.png"
+              alt="Logo EDAN"
+              className="h-12 w-auto object-contain rounded-lg"
             />
             <div>
-              <h1 className="text-3xl font-bold tracking-tight text-white flex items-center gap-2">
+              <h1 className="text-3xl font-bold tracking-tight text-white">
                 Stock Barang <span className="text-emerald-400">EDAN</span>
               </h1>
-              <p className="text-slate-400 text-sm mt-0.5 flex items-center gap-2">
-                Mode: 
-                <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold ${
-                  activeTab === 'masuk' 
-                    ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' 
-                    : activeTab === 'keluar'
-                    ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
-                    : activeTab === 'maqna'
-                    ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20'
-                    : 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20'
-                }`}>
-                  {activeTab === 'masuk'
-                    ? 'Barang Masuk'
-                    : activeTab === 'keluar'
-                    ? 'Barang Keluar'
-                    : activeTab === 'maqna'
-                    ? '📦 Stock Barang Maqna'
-                    : '📜 Audit Log'}
-                </span>
-              </p>
+              <div className="flex items-center gap-2 mt-1">
+                <span className="text-slate-400 text-xs">Mode:</span>
+                {activeTab === 'masuk' && (
+                  <span className="px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-400 text-xs font-bold border border-emerald-500/20">
+                    Barang Masuk
+                  </span>
+                )}
+                {activeTab === 'keluar' && (
+                  <span className="px-2 py-0.5 rounded-md bg-rose-500/10 text-rose-400 text-xs font-bold border border-rose-500/20">
+                    Barang Keluar
+                  </span>
+                )}
+                {activeTab === 'audit' && (
+                  <span className="px-2 py-0.5 rounded-md bg-indigo-500/10 text-indigo-400 text-xs font-bold border border-indigo-500/20">
+                    Audit Log
+                  </span>
+                )}
+                {activeTab === 'maqna' && (
+                  <span className="px-2 py-0.5 rounded-md bg-cyan-500/10 text-cyan-400 text-xs font-bold border border-cyan-500/20">
+                    📦 Stock Barang Maqna
+                  </span>
+                )}
+                {userRole === 'viewer' && (
+                  <span className="px-2 py-0.5 rounded-md bg-slate-800 text-slate-300 text-xs font-semibold border border-slate-700">
+                    👁️ View Only
+                  </span>
+                )}
+              </div>
             </div>
           </div>
 
           <div className="flex items-center gap-3">
-            {userRole === 'admin' && (
+            {(userRole === 'admin' || userRole === 'viewer') && (
               <div className="flex flex-wrap bg-slate-900 p-1.5 rounded-2xl border border-slate-800 gap-1">
                 <button
                   onClick={() => navigate('/masuk')}
@@ -724,7 +981,7 @@ export default function App() {
 
             <button
               onClick={handleLogout}
-              className="px-4 py-2 text-xs font-semibold rounded-2xl bg-slate-900 hover:bg-rose-600/20 text-rose-400 border border-slate-800 hover:border-rose-500/30 transition-all"
+              className="px-4 py-2 bg-slate-900 hover:bg-rose-950/50 text-slate-400 hover:text-rose-400 border border-slate-800 hover:border-rose-900/50 rounded-xl text-xs font-semibold transition-all"
             >
               Logout
             </button>
@@ -741,138 +998,253 @@ export default function App() {
           />
         ) : activeTab === 'audit' ? (
           <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-6 backdrop-blur-xl shadow-xl space-y-6">
-            <div className="flex justify-between items-center">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
               <div>
-                <h2 className="text-xl font-bold text-white flex items-center gap-2">
-                  📜 Audit Log System (Jejak Aktivitas Staf)
+                <h2 className="text-xl font-semibold text-white flex items-center gap-2">
+                  <span>📜</span> Riwayat Audit Aktivitas Sistem
                 </h2>
                 <p className="text-xs text-slate-400 mt-1">
-                  Catatan real-time aksi input, edit, hapus, dan pengembalian barang yang dilakukan pengguna.
+                  Catatan otomatis setiap penambahan, perubahan, pengembalian, dan penghapusan data
                 </p>
               </div>
-              <button
-                onClick={fetchAuditLogs}
-                className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-xl transition-all border border-slate-700"
-              >
-                🔄 Refresh Log
-              </button>
+
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="flex items-center bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5 gap-2 text-xs">
+                  <span className="text-slate-400 font-medium">Dari:</span>
+                  <input
+                    type="date"
+                    value={startDate}
+                    onChange={(e) => setStartDate(e.target.value)}
+                    className="bg-transparent text-slate-200 focus:outline-none text-xs"
+                  />
+                  <span className="text-slate-400 font-medium">S/D:</span>
+                  <input
+                    type="date"
+                    value={endDate}
+                    onChange={(e) => setEndDate(e.target.value)}
+                    className="bg-transparent text-slate-200 focus:outline-none text-xs"
+                  />
+                  {(startDate || endDate) && (
+                    <button
+                      onClick={handleResetDateRange}
+                      className="text-rose-400 hover:text-rose-300 font-bold ml-1 text-xs"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+
+                <input
+                  type="text"
+                  placeholder="Cari aktivitas / user..."
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  className="bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500 w-full sm:w-64"
+                />
+              </div>
             </div>
 
             <div className="overflow-x-auto rounded-xl border border-slate-800">
               <table className="w-full text-left text-sm text-slate-300">
                 <thead className="bg-slate-950 text-slate-400 font-semibold uppercase text-xs border-b border-slate-800">
                   <tr>
-                    <th className="py-3.5 px-4">Waktu (WIB)</th>
-                    <th className="py-3.5 px-4">User / Operator</th>
+                    <th className="py-3.5 px-4">Waktu Aktivitas</th>
+                    <th className="py-3.5 px-4">User / Akun</th>
                     <th className="py-3.5 px-4">Aksi</th>
-                    <th className="py-3.5 px-4">Detail Perubahan Data</th>
+                    <th className="py-3.5 px-4">Keterangan Detail</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/60">
                   {loading ? (
                     <tr>
-                      <td colSpan="4" className="text-center py-8 text-slate-500">Memuat riwayat audit...</td>
+                      <td colSpan="4" className="text-center py-8 text-slate-500">
+                        Memuat riwayat audit...
+                      </td>
                     </tr>
-                  ) : auditLogsData.length === 0 ? (
+                  ) : filteredAuditLogs.length === 0 ? (
                     <tr>
-                      <td colSpan="4" className="text-center py-8 text-slate-500">Belum ada riwayat aktivitas tersimpan.</td>
+                      <td colSpan="4" className="text-center py-8 text-slate-500">
+                        Belum ada catatan aktivitas sistem.
+                      </td>
                     </tr>
                   ) : (
-                    auditLogsData.map(audit => (
-                      <tr key={audit.id} className="hover:bg-slate-800/40 transition-colors">
-                        <td className="py-3.5 px-4 text-xs font-mono text-slate-400">
-                          {new Date(audit.created_at).toLocaleString('id-ID', {
-                            day: '2-digit',
-                            month: 'short',
-                            year: 'numeric',
-                            hour: '2-digit',
-                            minute: '2-digit',
-                            second: '2-digit'
-                          })} WIB
-                        </td>
-                        <td className="py-3.5 px-4 font-semibold text-indigo-300">
-                          {audit.user_email}
-                        </td>
-                        <td className="py-3.5 px-4">
-                          {audit.action === 'TAMBAH' && (
-                            <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                              🟢 + TAMBAH
+                    filteredAuditLogs.map((audit) => {
+                      const actionBadge =
+                        audit.action === 'TAMBAH'
+                          ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                          : audit.action === 'EDIT'
+                          ? 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20'
+                          : audit.action === 'HAPUS'
+                          ? 'bg-rose-500/10 text-rose-400 border-rose-500/20'
+                          : audit.action === 'KEMBALIKAN'
+                          ? 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+                          : 'bg-slate-800 text-slate-300 border-slate-700';
+
+                      return (
+                        <tr
+                          key={audit.id}
+                          className="hover:bg-slate-800/40 transition-colors"
+                        >
+                          <td className="py-3 px-4 font-mono text-xs text-slate-400 whitespace-nowrap">
+                            {new Date(audit.created_at).toLocaleString('id-ID', {
+                              day: '2-digit',
+                              month: 'short',
+                              year: 'numeric',
+                              hour: '2-digit',
+                              minute: '2-digit',
+                              second: '2-digit',
+                            })}{' '}
+                            WIB
+                          </td>
+                          <td className="py-3 px-4 font-medium text-slate-200">
+                            {audit.user_email}
+                          </td>
+                          <td className="py-3 px-4">
+                            <span
+                              className={`px-2.5 py-1 rounded-full text-xs font-bold border ${actionBadge}`}
+                            >
+                              {audit.action}
                             </span>
-                          )}
-                          {audit.action === 'EDIT' && (
-                            <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
-                              🟣 ✏️ EDIT
-                            </span>
-                          )}
-                          {audit.action === 'HAPUS' && (
-                            <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-rose-500/10 text-rose-400 border border-rose-500/20">
-                              🔴 🗑️ HAPUS
-                            </span>
-                          )}
-                          {audit.action === 'PENGEMBALIAN' && (
-                            <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20">
-                              🟡 ↩ BALIK
-                            </span>
-                          )}
-                        </td>
-                        <td className="py-3.5 px-4 text-slate-300 font-mono text-xs">
-                          {audit.detail}
-                        </td>
-                      </tr>
-                    ))
+                          </td>
+                          <td className="py-3 px-4 text-slate-300">{audit.detail}</td>
+                        </tr>
+                      );
+                    })
                   )}
                 </tbody>
               </table>
             </div>
           </div>
         ) : (
-          /* TAMPILAN UTAMA (BARANG MASUK / KELUAR) */
+          /* TAMPILAN NORMAL UNTUK BARANG MASUK & KELUAR */
           <>
             {/* Stat Cards */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              <div className="bg-slate-900/70 border border-slate-800 rounded-2xl p-4 flex items-center gap-4 shadow-lg backdrop-blur-xl">
-                <div className="p-3.5 bg-blue-500/10 text-blue-400 rounded-xl border border-blue-500/20 text-2xl">📦</div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+              <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-5 backdrop-blur-xl flex items-center gap-4">
+                <div className="p-3.5 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                  <svg
+                    className="w-6 h-6"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="2"
+                      d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"
+                    />
+                  </svg>
+                </div>
                 <div>
-                  <p className="text-xs text-slate-400 font-semibold uppercase tracking-wider">Total Jenis Barang</p>
-                  <h3 className="text-2xl font-black text-white mt-0.5">{totalJenisBarang} <span className="text-xs font-normal text-slate-400">Items</span></h3>
+                  <p className="text-xs text-slate-400 font-semibold uppercase tracking-wider">
+                    Total Jenis Barang
+                  </p>
+                  <h3 className="text-2xl font-black text-white mt-0.5">
+                    {totalJenisBarang}{' '}
+                    <span className="text-xs font-normal text-slate-500">Items</span>
+                  </h3>
                 </div>
               </div>
 
-              <div className="bg-slate-900/70 border border-slate-800 rounded-2xl p-4 flex items-center gap-4 shadow-lg backdrop-blur-xl">
-                <div className="p-3.5 bg-emerald-500/10 text-emerald-400 rounded-xl border border-emerald-500/20 text-2xl">📥</div>
+              <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-5 backdrop-blur-xl flex items-center gap-4">
+                <div className="p-3.5 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                  <svg
+                    className="w-6 h-6"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="2"
+                      d="M19 14l-7 7m0 0l-7-7m7 7V3"
+                    />
+                  </svg>
+                </div>
                 <div>
-                  <p className="text-xs text-slate-400 font-semibold uppercase tracking-wider">Masuk (Bulan Ini)</p>
-                  <h3 className="text-2xl font-black text-emerald-400 mt-0.5">+{totalMasukBulanIni} <span className="text-xs font-normal text-slate-400">Unit</span></h3>
+                  <p className="text-xs text-slate-400 font-semibold uppercase tracking-wider">
+                    Masuk (Bulan Ini)
+                  </p>
+                  <h3 className="text-2xl font-black text-emerald-400 mt-0.5">
+                    +{totalMasukBulanIni}{' '}
+                    <span className="text-xs font-normal text-slate-500">Unit</span>
+                  </h3>
                 </div>
               </div>
 
-              <div className="bg-slate-900/70 border border-slate-800 rounded-2xl p-4 flex items-center gap-4 shadow-lg backdrop-blur-xl">
-                <div className="p-3.5 bg-rose-500/10 text-rose-400 rounded-xl border border-rose-500/20 text-2xl">📤</div>
+              <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-5 backdrop-blur-xl flex items-center gap-4">
+                <div className="p-3.5 rounded-xl bg-rose-500/10 text-rose-400 border border-rose-500/20">
+                  <svg
+                    className="w-6 h-6"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="2"
+                      d="M5 10l7-7m0 0l7 7m-7-7v18"
+                    />
+                  </svg>
+                </div>
                 <div>
-                  <p className="text-xs text-slate-400 font-semibold uppercase tracking-wider">Keluar (Bulan Ini)</p>
-                  <h3 className="text-2xl font-black text-rose-400 mt-0.5">-{totalKeluarBulanIni} <span className="text-xs font-normal text-slate-400">Unit</span></h3>
+                  <p className="text-xs text-slate-400 font-semibold uppercase tracking-wider">
+                    Keluar (Bulan Ini)
+                  </p>
+                  <h3 className="text-2xl font-black text-rose-400 mt-0.5">
+                    -{totalKeluarBulanIni}{' '}
+                    <span className="text-xs font-normal text-slate-500">Unit</span>
+                  </h3>
                 </div>
               </div>
 
-              <div className="bg-slate-900/70 border border-slate-800 rounded-2xl p-4 flex items-center gap-4 shadow-lg backdrop-blur-xl">
-                <div className="p-3.5 bg-amber-500/10 text-amber-400 rounded-xl border border-amber-500/20 text-2xl">🔄</div>
+              <div className="bg-slate-900/60 border border-amber-500/30 rounded-2xl p-5 backdrop-blur-xl flex items-center gap-4">
+                <div className="p-3.5 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                  <svg
+                    className="w-6 h-6"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="2"
+                      d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"
+                    />
+                  </svg>
+                </div>
                 <div>
-                  <p className="text-xs text-slate-400 font-semibold uppercase tracking-wider">Sedang Dipinjam</p>
-                  <h3 className="text-2xl font-black text-amber-400 mt-0.5">{sisaSedangDipinjam} <span className="text-xs font-normal text-slate-400">Unit</span></h3>
+                  <p className="text-xs text-slate-400 font-semibold uppercase tracking-wider">
+                    Sedang Dipinjam
+                  </p>
+                  <h3 className="text-2xl font-black text-amber-400 mt-0.5">
+                    {sisaSedangDipinjam}{' '}
+                    <span className="text-xs font-normal text-slate-500">Unit</span>
+                  </h3>
                 </div>
               </div>
             </div>
 
-            {/* Form Card */}
             {/* Form Card (Disembunyikan jika akun viewer) */}
-            {(userRole === 'admin' || userRole === 'viewer') && (
+            {userRole !== 'viewer' && (
               <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-6 backdrop-blur-xl shadow-xl">
                 <h2 className="text-xl font-semibold mb-6 text-slate-200 flex items-center gap-2">
-                  <span className={`w-3 h-3 rounded-full ${activeTab === 'masuk' ? 'bg-emerald-500' : 'bg-rose-500'}`}></span>
+                  <span
+                    className={`w-3 h-3 rounded-full ${
+                      activeTab === 'masuk' ? 'bg-emerald-500' : 'bg-rose-500'
+                    }`}
+                  ></span>
                   Input khusus {activeTab === 'masuk' ? 'Barang Masuk' : 'Barang Keluar'}
                 </h2>
 
-                <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                <form
+                  onSubmit={handleSubmit}
+                  className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5"
+                >
                   <div>
                     <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
                       Surat Jalan / Asal
@@ -880,7 +1252,7 @@ export default function App() {
                     <input
                       type="text"
                       value={formData.asal}
-                      onChange={e => setFormData({ ...formData, asal: e.target.value })}
+                      onChange={(e) => setFormData({ ...formData, asal: e.target.value })}
                       className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-slate-200 focus:outline-none focus:border-indigo-500 transition-all text-sm"
                       placeholder="Contoh: SJ-001 / Vendor A"
                     />
@@ -893,7 +1265,7 @@ export default function App() {
                     <input
                       type="text"
                       value={formData.sn}
-                      onChange={e => setFormData({ ...formData, sn: e.target.value })}
+                      onChange={(e) => setFormData({ ...formData, sn: e.target.value })}
                       className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-slate-200 focus:outline-none focus:border-indigo-500 transition-all text-sm"
                       placeholder="SN12345678"
                     />
@@ -906,7 +1278,7 @@ export default function App() {
                     <input
                       type="text"
                       value={formData.nama}
-                      onChange={e => setFormData({ ...formData, nama: e.target.value })}
+                      onChange={(e) => setFormData({ ...formData, nama: e.target.value })}
                       className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-slate-200 focus:outline-none focus:border-indigo-500 transition-all text-sm"
                       placeholder="Masukkan nama barang"
                     />
@@ -919,10 +1291,14 @@ export default function App() {
                       </label>
                       <select
                         value={formData.status_keluar}
-                        onChange={e => setFormData({ ...formData, status_keluar: e.target.value })}
+                        onChange={(e) =>
+                          setFormData({ ...formData, status_keluar: e.target.value })
+                        }
                         className="w-full bg-slate-950 border border-amber-500/40 rounded-xl px-4 py-2.5 text-amber-300 focus:outline-none focus:border-amber-500 transition-all text-sm font-semibold"
                       >
-                        <option value="Keluar Permanen">🔴 Keluar Permanen (Dijual/Pakai)</option>
+                        <option value="Keluar Permanen">
+                          🔴 Keluar Permanen (Dijual/Pakai)
+                        </option>
                         <option value="Pinjam">🟡 Pinjam (Sementara)</option>
                       </select>
                     </div>
@@ -930,12 +1306,14 @@ export default function App() {
 
                   <div>
                     <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
-                      {activeTab === 'masuk' ? 'Quantity Masuk' : 'Quantity Keluar / Pinjam'}
+                      {activeTab === 'masuk'
+                        ? 'Quantity Masuk'
+                        : 'Quantity Keluar / Pinjam'}
                     </label>
                     <input
                       type="number"
                       value={formData.qty}
-                      onChange={e => setFormData({ ...formData, qty: e.target.value })}
+                      onChange={(e) => setFormData({ ...formData, qty: e.target.value })}
                       className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-slate-200 focus:outline-none focus:border-indigo-500 transition-all text-sm"
                       placeholder="0"
                     />
@@ -948,7 +1326,9 @@ export default function App() {
                     <input
                       type="date"
                       value={formData.tanggal}
-                      onChange={e => setFormData({ ...formData, tanggal: e.target.value })}
+                      onChange={(e) =>
+                        setFormData({ ...formData, tanggal: e.target.value })
+                      }
                       className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-slate-200 focus:outline-none focus:border-indigo-500 transition-all text-sm"
                     />
                   </div>
@@ -963,19 +1343,29 @@ export default function App() {
                       onChange={(e) => handleFileUpload(e, false)}
                       className="w-full text-sm text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-slate-800 file:text-slate-200 hover:file:bg-slate-700 cursor-pointer"
                     />
-                    
-                    {uploading && <p className="text-xs text-indigo-400 mt-1">Mengompres & Uploading foto...</p>}
-                    
+
+                    {uploading && (
+                      <p className="text-xs text-indigo-400 mt-1">
+                        Mengompres &amp; Uploading foto...
+                      </p>
+                    )}
+
                     {fileSizeInfo.original && !uploading && (
                       <div className="mt-2 text-xs flex items-center gap-2 bg-slate-950/80 p-2 rounded-lg border border-slate-800">
                         <span className="text-slate-400">
-                          Awal: <strong className="text-rose-400">{fileSizeInfo.original}</strong>
+                          Awal:{' '}
+                          <strong className="text-rose-400">
+                            {fileSizeInfo.original}
+                          </strong>
                         </span>
                         {fileSizeInfo.compressed && (
                           <>
                             <span className="text-slate-600">➔</span>
                             <span className="text-slate-400">
-                              Hasil: <strong className="text-emerald-400">{fileSizeInfo.compressed}</strong>
+                              Hasil:{' '}
+                              <strong className="text-emerald-400">
+                                {fileSizeInfo.compressed}
+                              </strong>
                             </span>
                           </>
                         )}
@@ -990,9 +1380,13 @@ export default function App() {
                     <input
                       type="text"
                       value={formData.ket}
-                      onChange={e => setFormData({ ...formData, ket: e.target.value })}
+                      onChange={(e) => setFormData({ ...formData, ket: e.target.value })}
                       className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-slate-200 focus:outline-none focus:border-indigo-500 transition-all text-sm"
-                      placeholder={activeTab === 'keluar' && formData.status_keluar === 'Pinjam' ? 'Peminjam, tujuan, estimasi balik, dll' : 'Catatan atau keterangan tambahan'}
+                      placeholder={
+                        activeTab === 'keluar' && formData.status_keluar === 'Pinjam'
+                          ? 'Peminjam, tujuan, estimasi balik, dll'
+                          : 'Catatan atau keterangan tambahan'
+                      }
                     />
                   </div>
 
@@ -1007,7 +1401,12 @@ export default function App() {
                           : 'bg-rose-600 hover:bg-rose-500 shadow-rose-950/50'
                       }`}
                     >
-                      Simpan {activeTab === 'masuk' ? 'Barang Masuk' : formData.status_keluar === 'Pinjam' ? 'Pinjaman Barang' : 'Barang Keluar'}
+                      Simpan{' '}
+                      {activeTab === 'masuk'
+                        ? 'Barang Masuk'
+                        : formData.status_keluar === 'Pinjam'
+                        ? 'Pinjaman Barang'
+                        : 'Barang Keluar'}
                     </button>
                   </div>
                 </form>
@@ -1018,21 +1417,26 @@ export default function App() {
             <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-6 backdrop-blur-xl shadow-xl space-y-6">
               <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
                 <h2 className="text-xl font-semibold text-slate-200">
-                  Riwayat {activeTab === 'masuk' ? 'Barang Masuk' : 'Barang Keluar & Pinjaman'}
+                  Riwayat{' '}
+                  {activeTab === 'masuk'
+                    ? 'Barang Masuk'
+                    : 'Barang Keluar & Pinjaman'}
                 </h2>
-                
+
                 <div className="flex flex-wrap items-center gap-3">
                   {activeTab === 'keluar' && (
                     <button
                       onClick={() => setOnlyPinjam(!onlyPinjam)}
                       className={`px-3 py-2 rounded-xl text-xs font-semibold border transition-all flex items-center gap-1.5 ${
-                        onlyPinjam 
-                          ? 'bg-amber-500 text-slate-950 border-amber-400 font-bold shadow-lg shadow-amber-950/50' 
+                        onlyPinjam
+                          ? 'bg-amber-500 text-slate-950 border-amber-400 font-bold shadow-lg shadow-amber-950/50'
                           : 'bg-slate-950 text-amber-400 border-amber-500/30 hover:border-amber-500'
                       }`}
                     >
                       <span>🟡</span>
-                      <span>{onlyPinjam ? 'Tampilkan Semua' : 'Hanya Dipinjam'}</span>
+                      <span>
+                        {onlyPinjam ? 'Tampilkan Semua' : 'Hanya Dipinjam'}
+                      </span>
                     </button>
                   )}
 
@@ -1040,8 +1444,18 @@ export default function App() {
                     onClick={handleExportExcel}
                     className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-xl text-xs flex items-center gap-2 shadow-lg shadow-emerald-950/40 transition-all"
                   >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    <svg
+                      className="w-4 h-4"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth="2"
+                        d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                      />
                     </svg>
                     Export Excel
                   </button>
@@ -1051,14 +1465,14 @@ export default function App() {
                     <input
                       type="date"
                       value={startDate}
-                      onChange={e => setStartDate(e.target.value)}
+                      onChange={(e) => setStartDate(e.target.value)}
                       className="bg-transparent text-slate-200 focus:outline-none text-xs"
                     />
                     <span className="text-slate-400 font-medium">S/D:</span>
                     <input
                       type="date"
                       value={endDate}
-                      onChange={e => setEndDate(e.target.value)}
+                      onChange={(e) => setEndDate(e.target.value)}
                       className="bg-transparent text-slate-200 focus:outline-none text-xs"
                     />
                     {(startDate || endDate) && (
@@ -1073,11 +1487,13 @@ export default function App() {
 
                   <select
                     value={selectedMonth}
-                    onChange={e => setSelectedMonth(e.target.value)}
+                    onChange={(e) => setSelectedMonth(e.target.value)}
                     className="bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500"
                   >
-                    {monthsList.map(m => (
-                      <option key={m.value} value={m.value}>{m.label}</option>
+                    {monthsList.map((m) => (
+                      <option key={m.value} value={m.value}>
+                        {m.label}
+                      </option>
                     ))}
                   </select>
 
@@ -1085,7 +1501,7 @@ export default function App() {
                     type="text"
                     placeholder="Cari Nama / SN / SJ..."
                     value={search}
-                    onChange={e => setSearch(e.target.value)}
+                    onChange={(e) => setSearch(e.target.value)}
                     className="bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500 w-full sm:w-52"
                   />
                 </div>
@@ -1094,12 +1510,20 @@ export default function App() {
               {searchedItemName && (
                 <div className="bg-emerald-950/40 border border-emerald-500/30 rounded-xl p-4 flex items-center justify-between">
                   <div>
-                    <p className="text-xs text-emerald-400 font-semibold uppercase tracking-wider">Info Total Stok Real-Time</p>
-                    <h4 className="text-lg font-bold text-white mt-0.5">Barang: "{searchedItemName}"</h4>
+                    <p className="text-xs text-emerald-400 font-semibold uppercase tracking-wider">
+                      Info Total Stok Real-Time
+                    </p>
+                    <h4 className="text-lg font-bold text-white mt-0.5">
+                      Barang: "{searchedItemName}"
+                    </h4>
                   </div>
                   <div className="text-right">
-                    <span className="text-2xl font-black text-emerald-400">{currentSearchedStock}</span>
-                    <span className="text-xs text-slate-400 block">Unit Tersedia di Gudang</span>
+                    <span className="text-2xl font-black text-emerald-400">
+                      {currentSearchedStock}
+                    </span>
+                    <span className="text-xs text-slate-400 block">
+                      Unit Tersedia di Gudang
+                    </span>
                   </div>
                 </div>
               )}
@@ -1112,7 +1536,9 @@ export default function App() {
                       <th className="py-3.5 px-4">Asal / SJ</th>
                       <th className="py-3.5 px-4">SN</th>
                       <th className="py-3.5 px-4">Nama Barang</th>
-                      <th className="py-3.5 px-4 text-emerald-400">{activeTab === 'masuk' ? 'QTY Masuk' : 'QTY Keluar'}</th>
+                      <th className="py-3.5 px-4 text-emerald-400">
+                        {activeTab === 'masuk' ? 'QTY Masuk' : 'QTY Keluar'}
+                      </th>
                       <th className="py-3.5 px-4">Tanggal</th>
                       <th className="py-3.5 px-4">Keterangan</th>
                       <th className="py-3.5 px-4">Foto</th>
@@ -1122,26 +1548,36 @@ export default function App() {
                   <tbody className="divide-y divide-slate-800/60">
                     {loading ? (
                       <tr>
-                        <td colSpan="9" className="text-center py-8 text-slate-500">Memuat data...</td>
+                        <td colSpan="9" className="text-center py-8 text-slate-500">
+                          Memuat data...
+                        </td>
                       </tr>
                     ) : Object.keys(groupedLogs).length === 0 ? (
                       <tr>
-                        <td colSpan="9" className="text-center py-8 text-slate-500">Belum ada riwayat data</td>
+                        <td colSpan="9" className="text-center py-8 text-slate-500">
+                          Belum ada riwayat data
+                        </td>
                       </tr>
                     ) : (
                       Object.entries(groupedLogs).map(([monthName, items]) => (
                         <React.Fragment key={monthName}>
                           <tr className="bg-slate-950/80">
-                            <td colSpan="9" className="py-2.5 px-4 font-bold text-xs uppercase tracking-wider text-emerald-400 border-y border-slate-800/80">
+                            <td
+                              colSpan="9"
+                              className="py-2.5 px-4 font-bold text-xs uppercase tracking-wider text-emerald-400 border-y border-slate-800/80"
+                            >
                               📅 Bulan: {monthName} ({items.length} Transaksi)
                             </td>
                           </tr>
 
-                          {items.map(log => {
+                          {items.map((log) => {
                             const isPinjam = log.ket?.includes('[DIPINJAM]');
 
                             return (
-                              <tr key={log.id} className="hover:bg-slate-800/40 transition-colors">
+                              <tr
+                                key={log.id}
+                                className="hover:bg-slate-800/40 transition-colors"
+                              >
                                 <td className="py-3 px-4">
                                   {log.tipe === 'Barang Masuk' ? (
                                     <span className="inline-block px-2.5 py-1 rounded-full text-xs font-bold whitespace-nowrap bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
@@ -1158,33 +1594,57 @@ export default function App() {
                                   )}
                                 </td>
                                 <td className="py-3 px-4">{log.asal || '-'}</td>
-                                <td className="py-3 px-4 font-mono text-slate-400">{log.sn || '-'}</td>
-                                <td className="py-3 px-4 font-semibold text-white">{log.nama || '-'}</td>
-                                <td className="py-3 px-4 font-bold text-emerald-400">{log.qty || 0} Unit</td>
-                                
+                                <td className="py-3 px-4 font-mono text-slate-400">
+                                  {log.sn || '-'}
+                                </td>
+                                <td className="py-3 px-4 font-semibold text-white">
+                                  {log.nama || '-'}
+                                </td>
+                                <td className="py-3 px-4 font-bold text-emerald-400">
+                                  {log.qty || 0} Unit
+                                </td>
+
                                 <td className="py-3 px-4">
-                                  <div className="text-slate-300 font-medium">{log.tanggal}</div>
+                                  <div className="text-slate-300 font-medium">
+                                    {log.tanggal}
+                                  </div>
                                   {log.created_at && (
                                     <div className="text-[10px] text-slate-500 flex items-center gap-1 mt-0.5">
                                       <span>🕒</span>
                                       <span>
-                                        {new Date(log.created_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })} WIB
+                                        {new Date(log.created_at).toLocaleTimeString(
+                                          'id-ID',
+                                          { hour: '2-digit', minute: '2-digit' }
+                                        )}{' '}
+                                        WIB
                                       </span>
                                     </div>
                                   )}
                                 </td>
 
-                                <td className="py-3 px-4 text-slate-400">{log.ket || '-'}</td>
+                                <td className="py-3 px-4 text-slate-400">
+                                  {log.ket || '-'}
+                                </td>
                                 <td className="py-3 px-4">
                                   {log.foto_url ? (
-                                    <a href={log.foto_url} target="_blank" rel="noreferrer">
-                                      <img src={log.foto_url} alt="Foto" className="w-10 h-10 object-cover rounded-lg border border-slate-700 hover:scale-110 transition-transform" />
+                                    <a
+                                      href={log.foto_url}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                    >
+                                      <img
+                                        src={log.foto_url}
+                                        alt="Foto"
+                                        className="w-10 h-10 object-cover rounded-lg border border-slate-700 hover:scale-110 transition-transform"
+                                      />
                                     </a>
                                   ) : (
-                                    <span className="text-xs text-slate-600">Tidak ada</span>
+                                    <span className="text-xs text-slate-600">
+                                      Tidak ada
+                                    </span>
                                   )}
                                 </td>
-                                
+
                                 <td className="py-3 px-4 text-center flex items-center justify-center gap-1.5">
                                   {userRole !== 'viewer' && isPinjam && (
                                     <button
@@ -1235,7 +1695,6 @@ export default function App() {
             </div>
           </>
         )}
-
       </div>
 
       {/* MODAL EDIT DATA TRANSAKSI */}
@@ -1245,9 +1704,11 @@ export default function App() {
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <div className="flex items-center gap-2">
                 <span className="text-lg">✏️</span>
-                <h3 className="text-lg font-bold text-white">Edit Transaksi #{editModal.id}</h3>
+                <h3 className="text-lg font-bold text-white">
+                  Edit Transaksi #{editModal.id}
+                </h3>
               </div>
-              <button 
+              <button
                 onClick={() => setEditModal({ ...editModal, isOpen: false })}
                 className="text-slate-400 hover:text-white text-lg font-bold"
               >
@@ -1263,7 +1724,9 @@ export default function App() {
                 <input
                   type="text"
                   value={editModal.asal}
-                  onChange={e => setEditModal({ ...editModal, asal: e.target.value })}
+                  onChange={(e) =>
+                    setEditModal({ ...editModal, asal: e.target.value })
+                  }
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 focus:outline-none focus:border-indigo-500 text-sm"
                 />
               </div>
@@ -1275,7 +1738,9 @@ export default function App() {
                 <input
                   type="text"
                   value={editModal.sn}
-                  onChange={e => setEditModal({ ...editModal, sn: e.target.value })}
+                  onChange={(e) =>
+                    setEditModal({ ...editModal, sn: e.target.value })
+                  }
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 focus:outline-none focus:border-indigo-500 text-sm"
                 />
               </div>
@@ -1287,7 +1752,9 @@ export default function App() {
                 <input
                   type="text"
                   value={editModal.nama}
-                  onChange={e => setEditModal({ ...editModal, nama: e.target.value })}
+                  onChange={(e) =>
+                    setEditModal({ ...editModal, nama: e.target.value })
+                  }
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 focus:outline-none focus:border-indigo-500 text-sm"
                 />
               </div>
@@ -1299,7 +1766,9 @@ export default function App() {
                 <input
                   type="number"
                   value={editModal.qty}
-                  onChange={e => setEditModal({ ...editModal, qty: e.target.value })}
+                  onChange={(e) =>
+                    setEditModal({ ...editModal, qty: e.target.value })
+                  }
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 focus:outline-none focus:border-indigo-500 text-sm"
                 />
               </div>
@@ -1311,7 +1780,9 @@ export default function App() {
                 <input
                   type="date"
                   value={editModal.tanggal}
-                  onChange={e => setEditModal({ ...editModal, tanggal: e.target.value })}
+                  onChange={(e) =>
+                    setEditModal({ ...editModal, tanggal: e.target.value })
+                  }
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 focus:outline-none focus:border-indigo-500 text-sm"
                 />
               </div>
@@ -1335,7 +1806,9 @@ export default function App() {
                 <input
                   type="text"
                   value={editModal.ket}
-                  onChange={e => setEditModal({ ...editModal, ket: e.target.value })}
+                  onChange={(e) =>
+                    setEditModal({ ...editModal, ket: e.target.value })
+                  }
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 focus:outline-none focus:border-indigo-500 text-sm"
                 />
               </div>
@@ -1365,20 +1838,47 @@ export default function App() {
           <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
             <div className="flex items-center gap-3">
               <div className="p-3 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/20">
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"/>
+                <svg
+                  className="w-6 h-6"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="2"
+                    d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"
+                  />
                 </svg>
               </div>
               <div>
-                <h3 className="text-lg font-bold text-white">Pengembalian Barang Pinjaman</h3>
-                <p className="text-xs text-slate-400">Konfirmasi barang masuk kembali ke gudang</p>
+                <h3 className="text-lg font-bold text-white">
+                  Pengembalian Barang Pinjaman
+                </h3>
+                <p className="text-xs text-slate-400">
+                  Konfirmasi barang masuk kembali ke gudang
+                </p>
               </div>
             </div>
 
             <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 text-xs space-y-2">
-              <p><strong className="text-slate-400">Nama Barang:</strong> <span className="text-white font-bold">{returnModal.log?.nama}</span></p>
-              <p><strong className="text-slate-400">Jumlah Dipinjam:</strong> <span className="text-emerald-400 font-bold">{returnModal.log?.qty} Unit</span></p>
-              <p><strong className="text-slate-400">Tanggal Pinjam:</strong> <span className="text-amber-300 font-bold">{returnModal.log?.tanggal}</span></p>
+              <p>
+                <strong className="text-slate-400">Nama Barang:</strong>{' '}
+                <span className="text-white font-bold">{returnModal.log?.nama}</span>
+              </p>
+              <p>
+                <strong className="text-slate-400">Jumlah Dipinjam:</strong>{' '}
+                <span className="text-emerald-400 font-bold">
+                  {returnModal.log?.qty} Unit
+                </span>
+              </p>
+              <p>
+                <strong className="text-slate-400">Tanggal Pinjam:</strong>{' '}
+                <span className="text-amber-300 font-bold">
+                  {returnModal.log?.tanggal}
+                </span>
+              </p>
             </div>
 
             <div>
@@ -1388,14 +1888,22 @@ export default function App() {
               <input
                 type="date"
                 value={returnModal.returnDate}
-                onChange={(e) => setReturnModal({ ...returnModal, returnDate: e.target.value })}
+                onChange={(e) =>
+                  setReturnModal({ ...returnModal, returnDate: e.target.value })
+                }
                 className="w-full bg-slate-950 border border-amber-500/40 rounded-xl px-4 py-2.5 text-slate-200 focus:outline-none focus:border-amber-500 text-sm"
               />
             </div>
 
             <div className="flex gap-3 justify-end pt-2">
               <button
-                onClick={() => setReturnModal({ isOpen: false, log: null, returnDate: new Date().toISOString().split('T')[0] })}
+                onClick={() =>
+                  setReturnModal({
+                    isOpen: false,
+                    log: null,
+                    returnDate: new Date().toISOString().split('T')[0],
+                  })
+                }
                 className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold transition-all"
               >
                 Batal
@@ -1416,14 +1924,40 @@ export default function App() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 transition-all">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-sm w-full p-6 shadow-2xl space-y-4">
             <div className="flex items-center gap-3">
-              <div className={`p-3 rounded-xl ${modal.type === 'danger' ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20' : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'}`}>
+              <div
+                className={`p-3 rounded-xl ${
+                  modal.type === 'danger'
+                    ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
+                    : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                }`}
+              >
                 {modal.type === 'danger' ? (
-                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+                  <svg
+                    className="w-6 h-6"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="2"
+                      d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                    />
                   </svg>
                 ) : (
-                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"/>
+                  <svg
+                    className="w-6 h-6"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="2"
+                      d="M5 13l4 4L19 7"
+                    />
                   </svg>
                 )}
               </div>
@@ -1460,7 +1994,6 @@ export default function App() {
           </div>
         </div>
       )}
-
     </div>
   );
 }

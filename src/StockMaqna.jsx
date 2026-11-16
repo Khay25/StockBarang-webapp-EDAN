@@ -32,7 +32,6 @@ export default function StockMaqna({
     setSaving(true);
     const inputQty = parseInt(manualForm.qty, 10) || 0;
 
-    // Gabungkan Tipe Barang ke dalam keterangan jika kolom tipe_barang belum ada di Supabase
     const infoTipe = manualForm.tipe_barang.trim()
       ? `[TIPE: ${manualForm.tipe_barang.trim()}] `
       : '';
@@ -92,7 +91,6 @@ export default function StockMaqna({
       const nama = (item.nama || item.nama_barang || item.item_name || '-').trim();
       const rawKet = (item.ket || item.keterangan || item.catatan || item.notes || '').trim();
 
-      // Ekstrak tag [TIPE: ...] jika diinput dari form manual Maqna
       const tipeMatch = rawKet.match(/^\[TIPE:\s*(.+?)\]\s*(.*)$/i);
       const extractedTipe = tipeMatch ? tipeMatch[1].trim() : '';
       const cleanKet = tipeMatch ? tipeMatch[2].trim() : rawKet;
@@ -188,7 +186,6 @@ export default function StockMaqna({
 
   return (
     <div className="space-y-6">
-      {/* Form Input Manual 1 per 1 (Otomatis hilang jika akun viewer) */}
       {!isReadOnly && (
         <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-6 backdrop-blur-xl shadow-xl">
           <h2 className="text-lg font-semibold mb-4 text-slate-200 flex items-center gap-2">
@@ -282,7 +279,6 @@ export default function StockMaqna({
         </div>
       )}
 
-      {/* Tabel Rekap 5 Kolom */}
       <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-6 backdrop-blur-xl shadow-xl space-y-6">
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
           <div>
@@ -295,7 +291,7 @@ export default function StockMaqna({
               </span>
             </div>
             <p className="text-xs text-slate-400 mt-1">
-              Otomatis sinkron dari input manual di atas maupun transaksi Barang Masuk &amp; Barang Keluar.
+              Otomatis sinkron dari input manual maupun transaksi Barang Masuk &amp; Barang Keluar.
             </p>
           </div>
 
