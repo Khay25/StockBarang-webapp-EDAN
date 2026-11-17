@@ -33,18 +33,28 @@ export default function App() {
   const [newKatData, setNewKatData] = useState({ kategori: '', sub_kategori: '' });
   const [savingKat, setSavingKat] = useState(false);
 
-  const [formData, setFormData] = useState({
+  // Header Surat Jalan (1 SJ untuk banyak barang)
+  const [sjHeader, setSjHeader] = useState({
     asal: '',
-    kategori: '',
-    sub_kategori: '',
-    sn: '',
-    nama: '',
-    qty: '',
+    perusahaan: '',
+    alamat: '',
     tanggal: new Date().toISOString().split('T')[0],
     ket: '',
     foto_url: '',
     status_keluar: 'Keluar Permanen',
   });
+
+  // Daftar Barang & SN di dalam 1 Surat Jalan
+  const [itemsList, setItemsList] = useState([
+    {
+      id: Date.now(),
+      kategori: '',
+      sub_kategori: '',
+      nama: '',
+      sn: '',
+      qty: '',
+    },
+  ]);
 
   const [modal, setModal] = useState({
     isOpen: false,
@@ -65,6 +75,8 @@ export default function App() {
     id: null,
     tipe: '',
     asal: '',
+    perusahaan: '',
+    alamat: '',
     kategori: '',
     sub_kategori: '',
     sn: '',
@@ -277,29 +289,16 @@ export default function App() {
     return Array.from(setKat);
   }, [kategoriList]);
 
-  const formSubCategories = useMemo(() => {
-    if (!formData.kategori) return [];
+  const getSubCategoriesFor = (kategoriName) => {
+    if (!kategoriName) return [];
     return kategoriList
       .filter(
         (item) =>
-          item.kategori?.trim().toLowerCase() ===
-          formData.kategori.trim().toLowerCase()
+          item.kategori?.trim().toLowerCase() === kategoriName.trim().toLowerCase()
       )
       .map((item) => item.sub_kategori?.trim())
       .filter(Boolean);
-  }, [kategoriList, formData.kategori]);
-
-  const editSubCategories = useMemo(() => {
-    if (!editModal.kategori) return [];
-    return kategoriList
-      .filter(
-        (item) =>
-          item.kategori?.trim().toLowerCase() ===
-          editModal.kategori.trim().toLowerCase()
-      )
-      .map((item) => item.sub_kategori?.trim())
-      .filter(Boolean);
-  }, [kategoriList, editModal.kategori]);
+  };
 
   const handleSaveNewKategori = async () => {
     const kat = newKatData.kategori.trim();
@@ -316,7 +315,11 @@ export default function App() {
     );
 
     if (exists) {
-      setFormData((prev) => ({ ...prev, kategori: kat, sub_kategori: sub }));
+      setItemsList((prev) =>
+        prev.map((row, idx) =>
+          idx === prev.length - 1 ? { ...row, kategori: kat, sub_kategori: sub } : row
+        )
+      );
       setNewKatData({ kategori: '', sub_kategori: '' });
       setShowNewKatForm(false);
       return;
@@ -332,12 +335,48 @@ export default function App() {
     } else {
       await recordAudit('TAMBAH', `Menambah Kategori Baru: ${kat} > ${sub}`);
       await fetchKategori();
-      setFormData((prev) => ({ ...prev, kategori: kat, sub_kategori: sub }));
+      setItemsList((prev) =>
+        prev.map((row, idx) =>
+          idx === prev.length - 1 ? { ...row, kategori: kat, sub_kategori: sub } : row
+        )
+      );
       setNewKatData({ kategori: '', sub_kategori: '' });
       setShowNewKatForm(false);
       showAlert('Kategori Ditambahkan', `Kategori "${kat} > ${sub}" berhasil dibuat.`, 'success');
     }
     setSavingKat(false);
+  };
+
+  // --- MANIPULASI BARIS BARANG & SN DALAM 1 SURAT JALAN ---
+  const handleAddItemRow = () => {
+    setItemsList((prev) => [
+      ...prev,
+      {
+        id: Date.now() + Math.random(),
+        kategori: prev[prev.length - 1]?.kategori || '',
+        sub_kategori: prev[prev.length - 1]?.sub_kategori || '',
+        nama: prev[prev.length - 1]?.nama || '',
+        sn: '',
+        qty: '1',
+      },
+    ]);
+  };
+
+  const handleRemoveItemRow = (rowId) => {
+    if (itemsList.length <= 1) return;
+    setItemsList((prev) => prev.filter((item) => item.id !== rowId));
+  };
+
+  const handleItemRowChange = (rowId, field, value) => {
+    setItemsList((prev) =>
+      prev.map((row) => {
+        if (row.id !== rowId) return row;
+        if (field === 'kategori') {
+          return { ...row, kategori: value, sub_kategori: '' };
+        }
+        return { ...row, [field]: value };
+      })
+    );
   };
 
   const compressImage = (file, maxWidth = 1000, quality = 0.7) => {
@@ -413,7 +452,7 @@ export default function App() {
           original: formatBytes(file.size),
           compressed: formatBytes(compressedBlob.size),
         });
-        setFormData((prev) => ({ ...prev, foto_url: publicUrlData.publicUrl }));
+        setSjHeader((prev) => ({ ...prev, foto_url: publicUrlData.publicUrl }));
       }
     } catch (err) {
       showAlert('Terjadi Kesalahan', err.message, 'danger');
@@ -426,99 +465,132 @@ export default function App() {
     e.preventDefault();
     if (userRole === 'viewer') return;
 
-    if (!formData.nama || !formData.qty) {
-      showAlert('Data Belum Lengkap', 'Nama Barang dan Quantity wajib diisi!', 'danger');
-      return;
+    // Validasi tiap baris barang
+    for (let i = 0; i < itemsList.length; i++) {
+      const row = itemsList[i];
+      if (!row.nama.trim() || !row.qty || Number(row.qty) <= 0) {
+        showAlert(
+          'Data Belum Lengkap',
+          `Baris barang ke-${i + 1}: Nama Barang dan Quantity (> 0) wajib diisi!`,
+          'danger'
+        );
+        return;
+      }
     }
 
-    const inputQty = parseInt(formData.qty, 10) || 0;
-
+    // Validasi stok gudang jika Barang Keluar (akumulasi per nama barang dalam 1 SJ)
     if (activeTab === 'keluar') {
-      const targetName = formData.nama.trim().toLowerCase();
+      const requestedMap = new Map();
+      itemsList.forEach((row) => {
+        const key = row.nama.trim().toLowerCase();
+        const qty = parseInt(row.qty, 10) || 0;
+        requestedMap.set(key, {
+          displayName: row.nama.trim(),
+          totalReq: (requestedMap.get(key)?.totalReq || 0) + qty,
+        });
+      });
 
-      const totalMasuk = allLogs
-        .filter(
-          (item) =>
-            item.tipe === 'Barang Masuk' &&
-            item.nama?.trim().toLowerCase() === targetName
-        )
-        .reduce((sum, item) => sum + (Number(item.qty) || 0), 0);
+      for (const [targetName, info] of requestedMap.entries()) {
+        const totalMasuk = allLogs
+          .filter(
+            (item) =>
+              item.tipe === 'Barang Masuk' &&
+              item.nama?.trim().toLowerCase() === targetName
+          )
+          .reduce((sum, item) => sum + (Number(item.qty) || 0), 0);
 
-      const totalKeluar = allLogs
-        .filter(
-          (item) =>
-            item.tipe === 'Barang Keluar' &&
-            item.nama?.trim().toLowerCase() === targetName
-        )
-        .reduce((sum, item) => sum + (Number(item.qty) || 0), 0);
+        const totalKeluar = allLogs
+          .filter(
+            (item) =>
+              item.tipe === 'Barang Keluar' &&
+              item.nama?.trim().toLowerCase() === targetName
+          )
+          .reduce((sum, item) => sum + (Number(item.qty) || 0), 0);
 
-      const sisaStok = totalMasuk - totalKeluar;
+        const sisaStok = totalMasuk - totalKeluar;
 
-      if (sisaStok <= 0) {
-        showAlert(
-          'Stok Tidak Tersedia!',
-          `Barang "${formData.nama}" tidak ada di gudang atau stok saat ini 0 unit.`,
-          'danger'
-        );
-        return;
-      }
+        if (sisaStok <= 0) {
+          showAlert(
+            'Stok Tidak Tersedia!',
+            `Barang "${info.displayName}" tidak ada di gudang atau stok saat ini 0 unit.`,
+            'danger'
+          );
+          return;
+        }
 
-      if (inputQty > sisaStok) {
-        showAlert(
-          'Stok Tidak Mencukupi!',
-          `Stok "${formData.nama}" yang tersedia di gudang hanya ${sisaStok} Unit. Tidak bisa mengeluarkan ${inputQty} Unit.`,
-          'danger'
-        );
-        return;
+        if (info.totalReq > sisaStok) {
+          showAlert(
+            'Stok Tidak Mencukupi!',
+            `Total permintaan "${info.displayName}" (${info.totalReq} Unit) melebihi sisa stok gudang (${sisaStok} Unit).`,
+            'danger'
+          );
+          return;
+        }
       }
     }
 
-    let finalKet = formData.ket;
-    if (activeTab === 'keluar' && formData.status_keluar === 'Pinjam') {
-      finalKet = `[DIPINJAM] ${formData.ket}`.trim();
+    let finalKet = sjHeader.ket.trim();
+    if (activeTab === 'keluar' && sjHeader.status_keluar === 'Pinjam') {
+      finalKet = `[DIPINJAM] ${finalKet}`.trim();
     }
 
-    const newEntry = {
-      tipe: activeTab === 'masuk' ? 'Barang Masuk' : 'Barang Keluar',
-      asal: formData.asal,
-      kategori: formData.kategori || '-',
-      sub_kategori: formData.sub_kategori || '-',
-      sn: formData.sn,
-      nama: formData.nama,
-      qty: inputQty,
-      tanggal: formData.tanggal,
+    const tipeTransaksi = activeTab === 'masuk' ? 'Barang Masuk' : 'Barang Keluar';
+    const sjValue = sjHeader.asal.trim() || `SJ-${Date.now()}`;
+
+    const entriesToInsert = itemsList.map((row) => ({
+      tipe: tipeTransaksi,
+      asal: sjValue,
+      perusahaan: sjHeader.perusahaan.trim() || '-',
+      alamat: sjHeader.alamat.trim() || '-',
+      kategori: row.kategori || '-',
+      sub_kategori: row.sub_kategori || '-',
+      sn: row.sn.trim(),
+      nama: row.nama.trim(),
+      qty: parseInt(row.qty, 10) || 0,
+      tanggal: sjHeader.tanggal,
       ket: finalKet,
-      foto_url: formData.foto_url,
-    };
+      foto_url: sjHeader.foto_url,
+    }));
 
-    const { error } = await supabase.from('stok_barang').insert([newEntry]);
+    const { error } = await supabase.from('stok_barang').insert(entriesToInsert);
 
     if (error) {
       showAlert('Gagal Menyimpan', error.message, 'danger');
     } else {
+      const ringkasanBarang = entriesToInsert
+        .map((it) => `${it.nama} (${it.qty} Unit${it.sn ? `, SN: ${it.sn}` : ''})`)
+        .join('; ');
+
       await recordAudit(
         'TAMBAH',
-        `Menambah ${newEntry.tipe}: "${newEntry.nama}" sebanyak ${newEntry.qty} Unit (Kategori: ${newEntry.kategori} > ${newEntry.sub_kategori})`
+        `Menambah ${tipeTransaksi} [SJ: ${sjValue} | PT: ${sjHeader.perusahaan || '-'}]: ${ringkasanBarang}`
       );
 
-      setFormData({
+      setSjHeader({
         asal: '',
-        kategori: '',
-        sub_kategori: '',
-        sn: '',
-        nama: '',
-        qty: '',
+        perusahaan: '',
+        alamat: '',
         tanggal: new Date().toISOString().split('T')[0],
         ket: '',
         foto_url: '',
         status_keluar: 'Keluar Permanen',
       });
+      setItemsList([
+        {
+          id: Date.now(),
+          kategori: '',
+          sub_kategori: '',
+          nama: '',
+          sn: '',
+          qty: '',
+        },
+      ]);
       setFileSizeInfo({ original: '', compressed: '' });
       fetchLogs();
       fetchAllLogsForStock();
       showAlert(
         'Berhasil Disimpan',
-        `Data "${newEntry.nama}" berhasil ditambahkan ke sistem.`,
+        `${entriesToInsert.length} item barang pada Surat Jalan "${sjValue}" berhasil disimpan!`,
         'success'
       );
     }
@@ -530,6 +602,8 @@ export default function App() {
       id: log.id,
       tipe: log.tipe,
       asal: log.asal || '',
+      perusahaan: log.perusahaan && log.perusahaan !== '-' ? log.perusahaan : '',
+      alamat: log.alamat && log.alamat !== '-' ? log.alamat : '',
       kategori: log.kategori && log.kategori !== '-' ? log.kategori : '',
       sub_kategori: log.sub_kategori && log.sub_kategori !== '-' ? log.sub_kategori : '',
       sn: log.sn || '',
@@ -549,6 +623,8 @@ export default function App() {
 
     const updatedData = {
       asal: editModal.asal,
+      perusahaan: editModal.perusahaan.trim() || '-',
+      alamat: editModal.alamat.trim() || '-',
       kategori: editModal.kategori || '-',
       sub_kategori: editModal.sub_kategori || '-',
       sn: editModal.sn,
@@ -608,6 +684,8 @@ export default function App() {
     const returnEntry = {
       tipe: 'Barang Masuk',
       asal: `Pengembalian Pinjaman (${log.asal || '-'})`,
+      perusahaan: log.perusahaan || '-',
+      alamat: log.alamat || '-',
       kategori: log.kategori || '-',
       sub_kategori: log.sub_kategori || '-',
       sn: log.sn,
@@ -647,8 +725,8 @@ export default function App() {
 
   const handleDelete = (log) => {
     showConfirm(
-      'Hapus Riwayat?',
-      `Yakin ingin menghapus data "${log.nama}"? Data yang dihapus tidak bisa dikembalikan.`,
+      'Hapus Item Riwayat?',
+      `Yakin ingin menghapus "${log.nama}" (SN: ${log.sn || '-'}) dari Surat Jalan "${log.asal || '-'}"?`,
       async () => {
         const { error } = await supabase
           .from('stok_barang')
@@ -671,34 +749,58 @@ export default function App() {
     );
   };
 
-  const handlePrintPDF = (log) => {
+  // Cetak PDF gabungan seluruh barang dalam 1 Surat Jalan
+  const handlePrintSJGroupPDF = (sjGroup) => {
     const printWindow = window.open('', '_blank');
-    const isPinjam = log.ket?.includes('[DIPINJAM]');
+    const firstItem = sjGroup.items[0];
+    const isPinjam = sjGroup.items.some((it) => it.ket?.includes('[DIPINJAM]'));
     const badgeText =
-      log.tipe === 'Barang Masuk'
+      firstItem.tipe === 'Barang Masuk'
         ? 'BUKTI BARANG MASUK'
         : isPinjam
         ? 'SURAT PEMINJAMAN BARANG'
         : 'BUKTI BARANG KELUAR';
     const badgeColor =
-      log.tipe === 'Barang Masuk' ? '#059669' : isPinjam ? '#d97706' : '#e11d48';
+      firstItem.tipe === 'Barang Masuk' ? '#059669' : isPinjam ? '#d97706' : '#e11d48';
+
+    const itemsRowsHtml = sjGroup.items
+      .map(
+        (it, idx) => `
+        <tr>
+          <td style="text-align:center;">${idx + 1}</td>
+          <td>${it.kategori && it.kategori !== '-' ? `${it.kategori}${it.sub_kategori && it.sub_kategori !== '-' ? ` (${it.sub_kategori})` : ''}` : '-'}</td>
+          <td><strong>${it.nama}</strong></td>
+          <td style="font-family: monospace;">${it.sn || '-'}</td>
+          <td style="text-align:center;"><strong>${it.qty} Unit</strong></td>
+        </tr>
+      `
+      )
+      .join('');
+
+    const totalQtyGroup = sjGroup.items.reduce(
+      (sum, it) => sum + (Number(it.qty) || 0),
+      0
+    );
 
     printWindow.document.write(`
       <html>
         <head>
-          <title>${badgeText} - ${log.nama}</title>
+          <title>${badgeText} - ${sjGroup.sj}</title>
           <style>
             body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 40px; color: #1e293b; }
-            .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #cbd5e1; padding-bottom: 20px; margin-bottom: 30px; }
+            .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #cbd5e1; padding-bottom: 20px; margin-bottom: 24px; }
             .logo { font-size: 24px; font-weight: bold; color: #0f172a; }
             .badge { background-color: ${badgeColor}; color: white; padding: 6px 14px; border-radius: 6px; font-weight: bold; font-size: 13px; letter-spacing: 1px; }
-            .info-table { width: 100%; border-collapse: collapse; margin-bottom: 30px; }
-            .info-table td { padding: 12px; border: 1px solid #cbd5e1; font-size: 14px; }
-            .info-label { font-weight: bold; background-color: #f8fafc; width: 30%; color: #475569; }
-            .signatures { display: flex; justify-content: space-between; margin-top: 60px; text-align: center; }
+            .meta-table { width: 100%; border-collapse: collapse; margin-bottom: 24px; }
+            .meta-table td { padding: 8px 12px; border: 1px solid #cbd5e1; font-size: 13px; }
+            .meta-label { font-weight: bold; background-color: #f8fafc; width: 25%; color: #475569; }
+            .items-table { width: 100%; border-collapse: collapse; margin-bottom: 30px; }
+            .items-table th { background-color: #0f172a; color: white; padding: 10px; font-size: 12px; text-transform: uppercase; border: 1px solid #0f172a; }
+            .items-table td { padding: 10px; border: 1px solid #cbd5e1; font-size: 13px; }
+            .signatures { display: flex; justify-content: space-between; margin-top: 50px; text-align: center; }
             .sig-box { width: 200px; }
             .sig-line { border-bottom: 1px solid #1e293b; height: 70px; margin-bottom: 8px; }
-            .footer { margin-top: 50px; font-size: 11px; color: #94a3b8; text-align: center; border-top: 1px dashed #cbd5e1; padding-top: 10px; }
+            .footer { margin-top: 40px; font-size: 11px; color: #94a3b8; text-align: center; border-top: 1px dashed #cbd5e1; padding-top: 10px; }
           </style>
         </head>
         <body>
@@ -710,39 +812,44 @@ export default function App() {
             <div class="badge">${badgeText}</div>
           </div>
 
-          <table class="info-table">
+          <table class="meta-table">
             <tr>
-              <td class="info-label">Nomor Dokumen / ID</td>
-              <td>#TRX-${log.id}</td>
+              <td class="meta-label">No. Surat Jalan</td>
+              <td><strong>${sjGroup.sj}</strong></td>
+              <td class="meta-label">Tanggal</td>
+              <td>${sjGroup.tanggal}</td>
             </tr>
             <tr>
-              <td class="info-label">Tanggal Transaksi</td>
-              <td>${log.tanggal}</td>
+              <td class="meta-label">PT / Perusahaan</td>
+              <td colspan="3"><strong>${sjGroup.perusahaan || '-'}</strong></td>
             </tr>
             <tr>
-              <td class="info-label">Kategori / Sub-Kategori</td>
-              <td>${log.kategori || '-'} / ${log.sub_kategori || '-'}</td>
+              <td class="meta-label">Alamat</td>
+              <td colspan="3">${sjGroup.alamat || '-'}</td>
             </tr>
             <tr>
-              <td class="info-label">Surat Jalan / Asal / Tujuan</td>
-              <td>${log.asal || '-'}</td>
+              <td class="meta-label">Keterangan</td>
+              <td colspan="3">${sjGroup.ket || '-'}</td>
             </tr>
-            <tr>
-              <td class="info-label">Nama Barang</td>
-              <td><strong>${log.nama}</strong></td>
-            </tr>
-            <tr>
-              <td class="info-label">Serial Number (SN)</td>
-              <td style="font-family: monospace;">${log.sn || '-'}</td>
-            </tr>
-            <tr>
-              <td class="info-label">Jumlah (Quantity)</td>
-              <td><strong>${log.qty} Unit</strong></td>
-            </tr>
-            <tr>
-              <td class="info-label">Keterangan / Catatan</td>
-              <td>${log.ket || '-'}</td>
-            </tr>
+          </table>
+
+          <table class="items-table">
+            <thead>
+              <tr>
+                <th style="width: 40px;">No</th>
+                <th>Kategori</th>
+                <th>Nama Barang</th>
+                <th>Serial Number (SN)</th>
+                <th style="width: 90px;">Quantity</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${itemsRowsHtml}
+              <tr>
+                <td colspan="4" style="text-align:right; font-weight:bold; background:#f8fafc;">TOTAL QUANTITY</td>
+                <td style="text-align:center; font-weight:bold; background:#f8fafc;">${totalQtyGroup} Unit</td>
+              </tr>
+            </tbody>
           </table>
 
           <div class="signatures">
@@ -778,12 +885,15 @@ export default function App() {
 
   const filteredLogs = useMemo(() => {
     return logs.filter((log) => {
+      const keyword = search.toLowerCase();
       const matchSearch =
-        log.nama?.toLowerCase().includes(search.toLowerCase()) ||
-        log.sn?.toLowerCase().includes(search.toLowerCase()) ||
-        log.asal?.toLowerCase().includes(search.toLowerCase()) ||
-        log.kategori?.toLowerCase().includes(search.toLowerCase()) ||
-        log.sub_kategori?.toLowerCase().includes(search.toLowerCase());
+        log.nama?.toLowerCase().includes(keyword) ||
+        log.sn?.toLowerCase().includes(keyword) ||
+        log.asal?.toLowerCase().includes(keyword) ||
+        log.perusahaan?.toLowerCase().includes(keyword) ||
+        log.alamat?.toLowerCase().includes(keyword) ||
+        log.kategori?.toLowerCase().includes(keyword) ||
+        log.sub_kategori?.toLowerCase().includes(keyword);
 
       let matchMonth = true;
       if (selectedMonth !== 'all' && log.tanggal) {
@@ -843,11 +953,13 @@ export default function App() {
     const headers = [
       'No',
       'Tipe Transaksi',
+      'No. Surat Jalan',
+      'PT / Perusahaan',
+      'Alamat',
       'Kategori',
       'Sub-Kategori',
-      'Asal / Surat Jalan',
-      'Serial Number (SN)',
       'Nama Barang',
+      'Serial Number (SN)',
       'Quantity',
       'Tanggal',
       'Jam Input',
@@ -863,11 +975,13 @@ export default function App() {
       return [
         index + 1,
         `"${log.tipe}"`,
+        `"${(log.asal || '-').replace(/"/g, '""')}"`,
+        `"${(log.perusahaan || '-').replace(/"/g, '""')}"`,
+        `"${(log.alamat || '-').replace(/"/g, '""')}"`,
         `"${(log.kategori || '-').replace(/"/g, '""')}"`,
         `"${(log.sub_kategori || '-').replace(/"/g, '""')}"`,
-        `"${(log.asal || '-').replace(/"/g, '""')}"`,
-        `"${(log.sn || '-').replace(/"/g, '""')}"`,
         `"${(log.nama || '-').replace(/"/g, '""')}"`,
+        `"${(log.sn || '-').replace(/"/g, '""')}"`,
         log.qty || 0,
         `"${log.tanggal || '-'}"`,
         `"${jamInput}"`,
@@ -933,8 +1047,10 @@ export default function App() {
     return totalMasuk - totalKeluar;
   }, [searchedItemName, allLogs]);
 
-  const groupedLogs = useMemo(() => {
-    const groups = {};
+  // Pengelompokan 2 Level: Bulan -> Surat Jalan (1 SJ bisa banyak barang + SN)
+  const groupedByMonthAndSJ = useMemo(() => {
+    const monthsMap = {};
+
     filteredLogs.forEach((log) => {
       if (!log.tanggal) return;
       const dateObj = new Date(log.tanggal);
@@ -943,12 +1059,50 @@ export default function App() {
         year: 'numeric',
       });
 
-      if (!groups[monthYear]) {
-        groups[monthYear] = [];
+      if (!monthsMap[monthYear]) {
+        monthsMap[monthYear] = {
+          totalItemsCount: 0,
+          sjMap: new Map(),
+        };
       }
-      groups[monthYear].push(log);
+
+      monthsMap[monthYear].totalItemsCount += 1;
+
+      const sjNumber = (log.asal || 'Tanpa Surat Jalan').trim();
+      const sjKey = `${sjNumber.toLowerCase()}__${log.tanggal}`;
+
+      if (!monthsMap[monthYear].sjMap.has(sjKey)) {
+        monthsMap[monthYear].sjMap.set(sjKey, {
+          key: sjKey,
+          sj: sjNumber,
+          perusahaan: log.perusahaan || '-',
+          alamat: log.alamat || '-',
+          tanggal: log.tanggal,
+          created_at: log.created_at,
+          ket: log.ket || '-',
+          foto_url: log.foto_url || '',
+          items: [],
+        });
+      }
+
+      const group = monthsMap[monthYear].sjMap.get(sjKey);
+      group.items.push(log);
+      if ((!group.perusahaan || group.perusahaan === '-') && log.perusahaan && log.perusahaan !== '-') {
+        group.perusahaan = log.perusahaan;
+      }
+      if ((!group.alamat || group.alamat === '-') && log.alamat && log.alamat !== '-') {
+        group.alamat = log.alamat;
+      }
+      if (!group.foto_url && log.foto_url) {
+        group.foto_url = log.foto_url;
+      }
     });
-    return groups;
+
+    return Object.entries(monthsMap).map(([monthName, val]) => ({
+      monthName,
+      totalItemsCount: val.totalItemsCount,
+      sjGroups: Array.from(val.sjMap.values()),
+    }));
   }, [filteredLogs]);
 
   const currentMonth = new Date().getMonth();
@@ -1364,8 +1518,8 @@ export default function App() {
 
             {/* Form Card (Disembunyikan jika akun viewer) */}
             {userRole !== 'viewer' && (
-              <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-6 backdrop-blur-xl shadow-xl">
-                <div className="flex flex-wrap items-center justify-between gap-2 mb-6">
+              <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-6 backdrop-blur-xl shadow-xl space-y-6">
+                <div className="flex flex-wrap items-center justify-between gap-2">
                   <h2 className="text-xl font-semibold text-slate-200 flex items-center gap-2">
                     <span
                       className={`w-3 h-3 rounded-full ${
@@ -1386,7 +1540,7 @@ export default function App() {
 
                 {/* Form Mini Tambah Kategori Baru */}
                 {showNewKatForm && (
-                  <div className="mb-6 p-4 rounded-xl bg-slate-950/90 border border-indigo-500/30 space-y-3">
+                  <div className="p-4 rounded-xl bg-slate-950/90 border border-indigo-500/30 space-y-3">
                     <p className="text-xs font-semibold text-indigo-400 uppercase tracking-wider">
                       Tambah Kategori &amp; Sub-Kategori Baru
                     </p>
@@ -1429,168 +1583,158 @@ export default function App() {
                   </div>
                 )}
 
-                <form
-                  onSubmit={handleSubmit}
-                  className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5"
-                >
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
-                      Kategori
-                    </label>
-                    <select
-                      value={formData.kategori}
-                      onChange={(e) =>
-                        setFormData({
-                          ...formData,
-                          kategori: e.target.value,
-                          sub_kategori: '',
-                        })
-                      }
-                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-slate-200 focus:outline-none focus:border-indigo-500 transition-all text-sm"
-                    >
-                      <option value="">-- Pilih Kategori --</option>
-                      {uniqueCategories.map((kat) => (
-                        <option key={kat} value={kat}>
-                          {kat}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
-                      Sub-Kategori
-                    </label>
-                    <select
-                      value={formData.sub_kategori}
-                      disabled={!formData.kategori}
-                      onChange={(e) =>
-                        setFormData({ ...formData, sub_kategori: e.target.value })
-                      }
-                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-slate-200 disabled:opacity-50 focus:outline-none focus:border-indigo-500 transition-all text-sm"
-                    >
-                      <option value="">
-                        {formData.kategori
-                          ? '-- Pilih Sub-Kategori --'
-                          : '-- Pilih Kategori Dulu --'}
-                      </option>
-                      {formSubCategories.map((sub) => (
-                        <option key={sub} value={sub}>
-                          {sub}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
-                      Surat Jalan / Asal
-                    </label>
-                    <input
-                      type="text"
-                      value={formData.asal}
-                      onChange={(e) => setFormData({ ...formData, asal: e.target.value })}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-slate-200 focus:outline-none focus:border-indigo-500 transition-all text-sm"
-                      placeholder="Contoh: SJ-001 / Vendor A"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
-                      Serial Number (SN)
-                    </label>
-                    <input
-                      type="text"
-                      value={formData.sn}
-                      onChange={(e) => setFormData({ ...formData, sn: e.target.value })}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-slate-200 focus:outline-none focus:border-indigo-500 transition-all text-sm"
-                      placeholder="SN12345678"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
-                      Nama Barang
-                    </label>
-                    <input
-                      type="text"
-                      value={formData.nama}
-                      onChange={(e) => setFormData({ ...formData, nama: e.target.value })}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-slate-200 focus:outline-none focus:border-indigo-500 transition-all text-sm"
-                      placeholder="Masukkan nama barang"
-                    />
-                  </div>
-
-                  {activeTab === 'keluar' && (
-                    <div>
-                      <label className="block text-xs font-semibold text-amber-400 uppercase tracking-wider mb-2">
-                        Status Transaksi Keluar
-                      </label>
-                      <select
-                        value={formData.status_keluar}
-                        onChange={(e) =>
-                          setFormData({ ...formData, status_keluar: e.target.value })
-                        }
-                        className="w-full bg-slate-950 border border-amber-500/40 rounded-xl px-4 py-2.5 text-amber-300 focus:outline-none focus:border-amber-500 transition-all text-sm font-semibold"
-                      >
-                        <option value="Keluar Permanen">
-                          🔴 Keluar Permanen (Dijual/Pakai)
-                        </option>
-                        <option value="Pinjam">🟡 Pinjam (Sementara)</option>
-                      </select>
+                <form onSubmit={handleSubmit} className="space-y-6">
+                  {/* SECTION 1: INFO SURAT JALAN (1 SJ UNTUK SEMUA BARANG DI BAWAH) */}
+                  <div className="p-4 rounded-xl bg-slate-950/60 border border-slate-800/80 space-y-4">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold uppercase tracking-wider text-emerald-400">
+                        1. Informasi Surat Jalan &amp; Tujuan / Asal
+                      </span>
+                      <span className="text-[11px] text-slate-500">
+                        1 Surat Jalan berlaku untuk seluruh barang di bawah
+                      </span>
                     </div>
-                  )}
 
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
-                      {activeTab === 'masuk'
-                        ? 'Quantity Masuk'
-                        : 'Quantity Keluar / Pinjam'}
-                    </label>
-                    <input
-                      type="number"
-                      value={formData.qty}
-                      onChange={(e) => setFormData({ ...formData, qty: e.target.value })}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-slate-200 focus:outline-none focus:border-indigo-500 transition-all text-sm"
-                      placeholder="0"
-                    />
-                  </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
+                          No. Surat Jalan *
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          value={sjHeader.asal}
+                          onChange={(e) =>
+                            setSjHeader({ ...sjHeader, asal: e.target.value })
+                          }
+                          className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-slate-200 focus:outline-none focus:border-indigo-500 transition-all text-sm"
+                          placeholder="Contoh: 736.SJKB.2026.29.10-1"
+                        />
+                      </div>
 
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
-                      Tanggal
-                    </label>
-                    <input
-                      type="date"
-                      value={formData.tanggal}
-                      onChange={(e) =>
-                        setFormData({ ...formData, tanggal: e.target.value })
-                      }
-                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-slate-200 focus:outline-none focus:border-indigo-500 transition-all text-sm"
-                    />
-                  </div>
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
+                          PT / Nama Perusahaan
+                        </label>
+                        <input
+                          type="text"
+                          value={sjHeader.perusahaan}
+                          onChange={(e) =>
+                            setSjHeader({ ...sjHeader, perusahaan: e.target.value })
+                          }
+                          className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-slate-200 focus:outline-none focus:border-indigo-500 transition-all text-sm"
+                          placeholder="Contoh: PT. Nusa Medika Indonesia"
+                        />
+                      </div>
 
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
-                      Foto Barang (Auto Kompres)
-                    </label>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      onChange={(e) => handleFileUpload(e, false)}
-                      className="w-full text-sm text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-slate-800 file:text-slate-200 hover:file:bg-slate-700 cursor-pointer"
-                    />
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
+                          Tanggal
+                        </label>
+                        <input
+                          type="date"
+                          value={sjHeader.tanggal}
+                          onChange={(e) =>
+                            setSjHeader({ ...sjHeader, tanggal: e.target.value })
+                          }
+                          className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-slate-200 focus:outline-none focus:border-indigo-500 transition-all text-sm"
+                        />
+                      </div>
+
+                      <div className="md:col-span-2">
+                        <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
+                          Alamat Perusahaan / Pengiriman
+                        </label>
+                        <input
+                          type="text"
+                          value={sjHeader.alamat}
+                          onChange={(e) =>
+                            setSjHeader({ ...sjHeader, alamat: e.target.value })
+                          }
+                          className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-slate-200 focus:outline-none focus:border-indigo-500 transition-all text-sm"
+                          placeholder="Contoh: Jl. Sudirman No. 45, Jakarta Selatan"
+                        />
+                      </div>
+
+                      {activeTab === 'keluar' ? (
+                        <div>
+                          <label className="block text-xs font-semibold text-amber-400 uppercase tracking-wider mb-1.5">
+                            Status Transaksi Keluar
+                          </label>
+                          <select
+                            value={sjHeader.status_keluar}
+                            onChange={(e) =>
+                              setSjHeader({
+                                ...sjHeader,
+                                status_keluar: e.target.value,
+                              })
+                            }
+                            className="w-full bg-slate-900 border border-amber-500/40 rounded-xl px-4 py-2.5 text-amber-300 focus:outline-none focus:border-amber-500 transition-all text-sm font-semibold"
+                          >
+                            <option value="Keluar Permanen">
+                              🔴 Keluar Permanen (Dijual/Pakai)
+                            </option>
+                            <option value="Pinjam">🟡 Pinjam (Sementara)</option>
+                          </select>
+                        </div>
+                      ) : (
+                        <div>
+                          <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
+                            Foto Surat Jalan / Barang
+                          </label>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={(e) => handleFileUpload(e, false)}
+                            className="w-full text-sm text-slate-400 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-slate-800 file:text-slate-200 hover:file:bg-slate-700 cursor-pointer"
+                          />
+                        </div>
+                      )}
+
+                      {activeTab === 'keluar' && (
+                        <div>
+                          <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
+                            Foto Surat Jalan / Barang
+                          </label>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={(e) => handleFileUpload(e, false)}
+                            className="w-full text-sm text-slate-400 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-slate-800 file:text-slate-200 hover:file:bg-slate-700 cursor-pointer"
+                          />
+                        </div>
+                      )}
+
+                      <div className={activeTab === 'keluar' ? 'md:col-span-2' : 'md:col-span-3'}>
+                        <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
+                          Keterangan Surat Jalan
+                        </label>
+                        <input
+                          type="text"
+                          value={sjHeader.ket}
+                          onChange={(e) =>
+                            setSjHeader({ ...sjHeader, ket: e.target.value })
+                          }
+                          className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-slate-200 focus:outline-none focus:border-indigo-500 transition-all text-sm"
+                          placeholder={
+                            activeTab === 'keluar' && sjHeader.status_keluar === 'Pinjam'
+                              ? 'Peminjam, tujuan, estimasi balik, dll'
+                              : 'Catatan atau keterangan tambahan untuk Surat Jalan ini'
+                          }
+                        />
+                      </div>
+                    </div>
 
                     {uploading && (
-                      <p className="text-xs text-indigo-400 mt-1">
+                      <p className="text-xs text-indigo-400">
                         Mengompres &amp; Uploading foto...
                       </p>
                     )}
 
                     {fileSizeInfo.original && !uploading && (
-                      <div className="mt-2 text-xs flex items-center gap-2 bg-slate-950/80 p-2 rounded-lg border border-slate-800">
+                      <div className="text-xs flex items-center gap-2 bg-slate-900/90 p-2 rounded-lg border border-slate-800 w-fit">
                         <span className="text-slate-400">
-                          Awal:{' '}
+                          Foto Awal:{' '}
                           <strong className="text-rose-400">
                             {fileSizeInfo.original}
                           </strong>
@@ -1599,7 +1743,7 @@ export default function App() {
                           <>
                             <span className="text-slate-600">➔</span>
                             <span className="text-slate-400">
-                              Hasil:{' '}
+                              Hasil Kompres:{' '}
                               <strong className="text-emerald-400">
                                 {fileSizeInfo.compressed}
                               </strong>
@@ -1610,47 +1754,162 @@ export default function App() {
                     )}
                   </div>
 
-                  <div className="md:col-span-2 lg:col-span-3">
-                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
-                      Keterangan
-                    </label>
-                    <input
-                      type="text"
-                      value={formData.ket}
-                      onChange={(e) => setFormData({ ...formData, ket: e.target.value })}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-slate-200 focus:outline-none focus:border-indigo-500 transition-all text-sm"
-                      placeholder={
-                        activeTab === 'keluar' && formData.status_keluar === 'Pinjam'
-                          ? 'Peminjam, tujuan, estimasi balik, dll'
-                          : 'Catatan atau keterangan tambahan'
-                      }
-                    />
+                  {/* SECTION 2: DAFTAR BARANG & SN (BISA TAMBAH BANYAK BARIS DALAM 1 SJ) */}
+                  <div className="p-4 rounded-xl bg-slate-950/60 border border-slate-800/80 space-y-4">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-xs font-bold uppercase tracking-wider text-cyan-400">
+                        2. Daftar Barang &amp; Serial Number ({itemsList.length} Item)
+                      </span>
+                      <button
+                        type="button"
+                        onClick={handleAddItemRow}
+                        className="px-3.5 py-1.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-semibold shadow-lg shadow-cyan-950/40 transition-all flex items-center gap-1.5"
+                      >
+                        <span>+ Tambah Barang / SN</span>
+                      </button>
+                    </div>
+
+                    <div className="space-y-3">
+                      {itemsList.map((row, index) => {
+                        const rowSubCats = getSubCategoriesFor(row.kategori);
+
+                        return (
+                          <div
+                            key={row.id}
+                            className="p-3.5 rounded-xl bg-slate-900/90 border border-slate-800 grid grid-cols-1 md:grid-cols-12 gap-3 items-end"
+                          >
+                            <div className="md:col-span-2">
+                              <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
+                                Kategori #{index + 1}
+                              </label>
+                              <select
+                                value={row.kategori}
+                                onChange={(e) =>
+                                  handleItemRowChange(row.id, 'kategori', e.target.value)
+                                }
+                                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
+                              >
+                                <option value="">-- Kategori --</option>
+                                {uniqueCategories.map((kat) => (
+                                  <option key={kat} value={kat}>
+                                    {kat}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+
+                            <div className="md:col-span-2">
+                              <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
+                                Sub-Kategori
+                              </label>
+                              <select
+                                value={row.sub_kategori}
+                                disabled={!row.kategori}
+                                onChange={(e) =>
+                                  handleItemRowChange(
+                                    row.id,
+                                    'sub_kategori',
+                                    e.target.value
+                                  )
+                                }
+                                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 disabled:opacity-50 focus:outline-none focus:border-indigo-500"
+                              >
+                                <option value="">-- Sub-Kat --</option>
+                                {rowSubCats.map((sub) => (
+                                  <option key={sub} value={sub}>
+                                    {sub}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+
+                            <div className="md:col-span-3">
+                              <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
+                                Nama Barang *
+                              </label>
+                              <input
+                                type="text"
+                                required
+                                value={row.nama}
+                                onChange={(e) =>
+                                  handleItemRowChange(row.id, 'nama', e.target.value)
+                                }
+                                placeholder="Nama barang"
+                                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
+                              />
+                            </div>
+
+                            <div className="md:col-span-3">
+                              <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
+                                Serial Number (SN)
+                              </label>
+                              <input
+                                type="text"
+                                value={row.sn}
+                                onChange={(e) =>
+                                  handleItemRowChange(row.id, 'sn', e.target.value)
+                                }
+                                placeholder="SN unik barang ini"
+                                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs font-mono text-cyan-300 focus:outline-none focus:border-indigo-500"
+                              />
+                            </div>
+
+                            <div className="md:col-span-1">
+                              <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
+                                Qty *
+                              </label>
+                              <input
+                                type="number"
+                                required
+                                min="1"
+                                value={row.qty}
+                                onChange={(e) =>
+                                  handleItemRowChange(row.id, 'qty', e.target.value)
+                                }
+                                placeholder="0"
+                                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-2 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
+                              />
+                            </div>
+
+                            <div className="md:col-span-1 flex justify-end">
+                              <button
+                                type="button"
+                                disabled={itemsList.length <= 1}
+                                onClick={() => handleRemoveItemRow(row.id)}
+                                title="Hapus baris barang ini"
+                                className="w-full py-2 px-2 rounded-lg bg-rose-500/10 hover:bg-rose-600 disabled:opacity-30 disabled:hover:bg-rose-500/10 text-rose-400 hover:text-white border border-rose-500/20 text-xs font-bold transition-all"
+                              >
+                                ✕
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
 
-                  <div className="md:col-span-2 lg:col-span-3 mt-2">
-                    <button
-                      type="submit"
-                      className={`w-full py-3 px-6 rounded-xl font-medium text-white shadow-lg transition-all ${
-                        activeTab === 'masuk'
-                          ? 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-950/50'
-                          : formData.status_keluar === 'Pinjam'
-                          ? 'bg-amber-600 hover:bg-amber-500 shadow-amber-950/50'
-                          : 'bg-rose-600 hover:bg-rose-500 shadow-rose-950/50'
-                      }`}
-                    >
-                      Simpan{' '}
-                      {activeTab === 'masuk'
-                        ? 'Barang Masuk'
-                        : formData.status_keluar === 'Pinjam'
-                        ? 'Pinjaman Barang'
-                        : 'Barang Keluar'}
-                    </button>
-                  </div>
+                  <button
+                    type="submit"
+                    className={`w-full py-3.5 px-6 rounded-xl font-semibold text-white shadow-lg transition-all ${
+                      activeTab === 'masuk'
+                        ? 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-950/50'
+                        : sjHeader.status_keluar === 'Pinjam'
+                        ? 'bg-amber-600 hover:bg-amber-500 shadow-amber-950/50'
+                        : 'bg-rose-600 hover:bg-rose-500 shadow-rose-950/50'
+                    }`}
+                  >
+                    Simpan Surat Jalan ({itemsList.length} Barang) —{' '}
+                    {activeTab === 'masuk'
+                      ? 'Barang Masuk'
+                      : sjHeader.status_keluar === 'Pinjam'
+                      ? 'Pinjaman Barang'
+                      : 'Barang Keluar'}
+                  </button>
                 </form>
               </div>
             )}
 
-            {/* Tabel Card */}
+            {/* Tabel Card (Dikelompokkan per Bulan -> per Surat Jalan) */}
             <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-6 backdrop-blur-xl shadow-xl space-y-6">
               <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
                 <h2 className="text-xl font-semibold text-slate-200">
@@ -1749,10 +2008,10 @@ export default function App() {
 
                   <input
                     type="text"
-                    placeholder="Cari Nama / Kategori / SN..."
+                    placeholder="Cari SJ / PT / Barang / SN..."
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
-                    className="bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500 w-full sm:w-52"
+                    className="bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500 w-full sm:w-56"
                   />
                 </div>
               </div>
@@ -1778,189 +2037,219 @@ export default function App() {
                 </div>
               )}
 
-              <div className="overflow-x-auto rounded-xl border border-slate-800">
-                <table className="w-full text-left text-sm text-slate-300">
-                  <thead className="bg-slate-950 text-slate-400 font-semibold uppercase text-xs border-b border-slate-800">
-                    <tr>
-                      <th className="py-3.5 px-4">Tipe</th>
-                      <th className="py-3.5 px-4">Kategori / Sub</th>
-                      <th className="py-3.5 px-4">Asal / SJ</th>
-                      <th className="py-3.5 px-4">SN</th>
-                      <th className="py-3.5 px-4">Nama Barang</th>
-                      <th className="py-3.5 px-4 text-emerald-400">
-                        {activeTab === 'masuk' ? 'QTY Masuk' : 'QTY Keluar'}
-                      </th>
-                      <th className="py-3.5 px-4">Tanggal</th>
-                      <th className="py-3.5 px-4">Keterangan</th>
-                      <th className="py-3.5 px-4">Foto</th>
-                      <th className="py-3.5 px-4 text-center">Aksi</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-800/60">
-                    {loading ? (
-                      <tr>
-                        <td colSpan="10" className="text-center py-8 text-slate-500">
-                          Memuat data...
-                        </td>
-                      </tr>
-                    ) : Object.keys(groupedLogs).length === 0 ? (
-                      <tr>
-                        <td colSpan="10" className="text-center py-8 text-slate-500">
-                          Belum ada riwayat data
-                        </td>
-                      </tr>
-                    ) : (
-                      Object.entries(groupedLogs).map(([monthName, items]) => (
-                        <React.Fragment key={monthName}>
-                          <tr className="bg-slate-950/80">
-                            <td
-                              colSpan="10"
-                              className="py-2.5 px-4 font-bold text-xs uppercase tracking-wider text-emerald-400 border-y border-slate-800/80"
+              {/* LIST RIWAYAT PER BULAN -> PER SURAT JALAN (1 SJ = BANYAK BARANG & SN) */}
+              {loading ? (
+                <div className="text-center py-10 text-slate-500 text-sm">
+                  Memuat data...
+                </div>
+              ) : groupedByMonthAndSJ.length === 0 ? (
+                <div className="text-center py-10 text-slate-500 text-sm border border-slate-800 rounded-xl">
+                  Belum ada riwayat data
+                </div>
+              ) : (
+                <div className="space-y-8">
+                  {groupedByMonthAndSJ.map((monthGroup) => (
+                    <div key={monthGroup.monthName} className="space-y-4">
+                      {/* Header Bulan */}
+                      <div className="px-4 py-2.5 rounded-xl bg-slate-950 border border-slate-800 font-bold text-xs uppercase tracking-wider text-emerald-400 flex items-center justify-between">
+                        <span>
+                          📅 Bulan: {monthGroup.monthName} ({monthGroup.sjGroups.length}{' '}
+                          Surat Jalan • {monthGroup.totalItemsCount} Item)
+                        </span>
+                      </div>
+
+                      {/* Kartu per Surat Jalan */}
+                      <div className="space-y-4">
+                        {monthGroup.sjGroups.map((sjGroup) => {
+                          const totalQtySJ = sjGroup.items.reduce(
+                            (acc, item) => acc + (Number(item.qty) || 0),
+                            0
+                          );
+
+                          return (
+                            <div
+                              key={sjGroup.key}
+                              className="rounded-xl border border-slate-800 bg-slate-950/60 overflow-hidden shadow-lg"
                             >
-                              📅 Bulan: {monthName} ({items.length} Transaksi)
-                            </td>
-                          </tr>
-
-                          {items.map((log) => {
-                            const isPinjam = log.ket?.includes('[DIPINJAM]');
-
-                            return (
-                              <tr
-                                key={log.id}
-                                className="hover:bg-slate-800/40 transition-colors"
-                              >
-                                <td className="py-3 px-4">
-                                  {log.tipe === 'Barang Masuk' ? (
-                                    <span className="inline-block px-2.5 py-1 rounded-full text-xs font-bold whitespace-nowrap bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                                      Barang Masuk
+                              {/* Header Surat Jalan (Info SJ, PT/Perusahaan, Alamat, Tanggal, Foto, Cetak PDF 1 SJ) */}
+                              <div className="p-4 bg-slate-900/90 border-b border-slate-800 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                                <div className="space-y-1.5">
+                                  <div className="flex flex-wrap items-center gap-2.5">
+                                    <span className="px-3 py-1 rounded-lg bg-cyan-500/10 text-cyan-300 border border-cyan-500/20 font-mono text-xs font-bold">
+                                      📄 SJ: {sjGroup.sj}
                                     </span>
-                                  ) : isPinjam ? (
-                                    <span className="inline-block px-2.5 py-1 rounded-full text-xs font-bold whitespace-nowrap bg-amber-500/10 text-amber-400 border border-amber-500/20">
-                                      🟡 Pinjam
-                                    </span>
-                                  ) : (
-                                    <span className="inline-block px-2.5 py-1 rounded-full text-xs font-bold whitespace-nowrap bg-rose-500/10 text-rose-400 border border-rose-500/20">
-                                      🔴 Barang Keluar
-                                    </span>
-                                  )}
-                                </td>
 
-                                <td className="py-3 px-4">
-                                  {log.kategori && log.kategori !== '-' ? (
-                                    <div className="flex flex-col gap-0.5">
-                                      <span className="px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-300 border border-indigo-500/20 text-xs font-semibold w-fit">
-                                        {log.kategori}
+                                    {sjGroup.perusahaan && sjGroup.perusahaan !== '-' && (
+                                      <span className="px-3 py-1 rounded-lg bg-indigo-500/10 text-indigo-300 border border-indigo-500/20 text-xs font-bold">
+                                        🏢 {sjGroup.perusahaan}
                                       </span>
-                                      {log.sub_kategori && log.sub_kategori !== '-' && (
-                                        <span className="text-[11px] text-slate-400 pl-1">
-                                          ↳ {log.sub_kategori}
-                                        </span>
-                                      )}
-                                    </div>
-                                  ) : (
-                                    <span className="text-xs text-slate-600">-</span>
-                                  )}
-                                </td>
+                                    )}
 
-                                <td className="py-3 px-4">{log.asal || '-'}</td>
-                                <td className="py-3 px-4 font-mono text-slate-400">
-                                  {log.sn || '-'}
-                                </td>
-                                <td className="py-3 px-4 font-semibold text-white">
-                                  {log.nama || '-'}
-                                </td>
-                                <td className="py-3 px-4 font-bold text-emerald-400">
-                                  {log.qty || 0} Unit
-                                </td>
+                                    <span className="text-xs text-slate-400 font-medium">
+                                      🗓️ {sjGroup.tanggal}
+                                    </span>
 
-                                <td className="py-3 px-4">
-                                  <div className="text-slate-300 font-medium">
-                                    {log.tanggal}
+                                    <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-xs font-bold">
+                                      {sjGroup.items.length} Barang • Total {totalQtySJ}{' '}
+                                      Unit
+                                    </span>
                                   </div>
-                                  {log.created_at && (
-                                    <div className="text-[10px] text-slate-500 flex items-center gap-1 mt-0.5">
-                                      <span>🕒</span>
-                                      <span>
-                                        {new Date(log.created_at).toLocaleTimeString(
-                                          'id-ID',
-                                          { hour: '2-digit', minute: '2-digit' }
-                                        )}{' '}
-                                        WIB
-                                      </span>
-                                    </div>
-                                  )}
-                                </td>
 
-                                <td className="py-3 px-4 text-slate-400">
-                                  {log.ket || '-'}
-                                </td>
-                                <td className="py-3 px-4">
-                                  {log.foto_url ? (
+                                  {sjGroup.alamat && sjGroup.alamat !== '-' && (
+                                    <p className="text-xs text-slate-400">
+                                      📍 <span className="text-slate-300">{sjGroup.alamat}</span>
+                                    </p>
+                                  )}
+
+                                  {sjGroup.ket && sjGroup.ket !== '-' && (
+                                    <p className="text-xs text-slate-400">
+                                      📝 <span className="text-slate-300">{sjGroup.ket}</span>
+                                    </p>
+                                  )}
+                                </div>
+
+                                <div className="flex items-center gap-2.5 self-start lg:self-center">
+                                  {sjGroup.foto_url && (
                                     <a
-                                      href={log.foto_url}
+                                      href={sjGroup.foto_url}
                                       target="_blank"
                                       rel="noreferrer"
+                                      className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs text-slate-200 transition-all"
+                                      title="Lihat Foto Surat Jalan / Barang"
                                     >
                                       <img
-                                        src={log.foto_url}
-                                        alt="Foto"
-                                        className="w-10 h-10 object-cover rounded-lg border border-slate-700 hover:scale-110 transition-transform"
+                                        src={sjGroup.foto_url}
+                                        alt="Foto SJ"
+                                        className="w-6 h-6 object-cover rounded"
                                       />
+                                      <span>Lihat Foto</span>
                                     </a>
-                                  ) : (
-                                    <span className="text-xs text-slate-600">
-                                      Tidak ada
-                                    </span>
-                                  )}
-                                </td>
-
-                                <td className="py-3 px-4 text-center flex items-center justify-center gap-1.5">
-                                  {userRole !== 'viewer' && isPinjam && (
-                                    <button
-                                      onClick={() => openReturnModal(log)}
-                                      className="px-2.5 py-1.5 bg-amber-500/10 hover:bg-amber-500 text-amber-400 hover:text-white rounded-lg text-xs font-medium border border-amber-500/20 transition-all"
-                                      title="Kembalikan Stok Barang Pinjaman"
-                                    >
-                                      ↩ Balik
-                                    </button>
-                                  )}
-
-                                  {userRole !== 'viewer' && (
-                                    <button
-                                      onClick={() => openEditModal(log)}
-                                      className="px-2.5 py-1.5 bg-indigo-500/10 hover:bg-indigo-600 text-indigo-400 hover:text-white rounded-lg text-xs font-medium border border-indigo-500/20 transition-all"
-                                      title="Edit Transaksi Ini"
-                                    >
-                                      ✏️ Edit
-                                    </button>
                                   )}
 
                                   <button
-                                    onClick={() => handlePrintPDF(log)}
-                                    className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg text-xs font-medium border border-slate-700 transition-all"
-                                    title="Cetak Bukti PDF"
+                                    onClick={() => handlePrintSJGroupPDF(sjGroup)}
+                                    className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-xl text-xs font-semibold border border-slate-700 transition-all flex items-center gap-1.5"
+                                    title="Cetak Bukti PDF untuk seluruh barang dalam Surat Jalan ini"
                                   >
-                                    🖨️ PDF
+                                    🖨️ Cetak PDF SJ
                                   </button>
+                                </div>
+                              </div>
 
-                                  {userRole !== 'viewer' && (
-                                    <button
-                                      onClick={() => handleDelete(log)}
-                                      className="px-2.5 py-1.5 bg-rose-500/10 hover:bg-rose-500 text-rose-400 hover:text-white rounded-lg text-xs font-medium border border-rose-500/20 transition-all"
-                                    >
-                                      Hapus
-                                    </button>
-                                  )}
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </React.Fragment>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
+                              {/* Sub-Tabel Daftar Barang & SN di dalam Surat Jalan ini */}
+                              <div className="overflow-x-auto">
+                                <table className="w-full text-left text-sm text-slate-300">
+                                  <thead className="bg-slate-950/70 text-slate-400 font-semibold uppercase text-[11px] border-b border-slate-800/80">
+                                    <tr>
+                                      <th className="py-2.5 px-4 w-28">Status</th>
+                                      <th className="py-2.5 px-4">Kategori / Sub</th>
+                                      <th className="py-2.5 px-4">Nama Barang</th>
+                                      <th className="py-2.5 px-4">Serial Number (SN)</th>
+                                      <th className="py-2.5 px-4 text-emerald-400">
+                                        {activeTab === 'masuk' ? 'QTY Masuk' : 'QTY Keluar'}
+                                      </th>
+                                      {userRole !== 'viewer' && (
+                                        <th className="py-2.5 px-4 text-center">Aksi</th>
+                                      )}
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-slate-800/50">
+                                    {sjGroup.items.map((log) => {
+                                      const isPinjam = log.ket?.includes('[DIPINJAM]');
+
+                                      return (
+                                        <tr
+                                          key={log.id}
+                                          className="hover:bg-slate-800/30 transition-colors"
+                                        >
+                                          <td className="py-2.5 px-4">
+                                            {log.tipe === 'Barang Masuk' ? (
+                                              <span className="inline-block px-2 py-0.5 rounded-full text-[11px] font-bold whitespace-nowrap bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                                                Masuk
+                                              </span>
+                                            ) : isPinjam ? (
+                                              <span className="inline-block px-2 py-0.5 rounded-full text-[11px] font-bold whitespace-nowrap bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                                                🟡 Pinjam
+                                              </span>
+                                            ) : (
+                                              <span className="inline-block px-2 py-0.5 rounded-full text-[11px] font-bold whitespace-nowrap bg-rose-500/10 text-rose-400 border border-rose-500/20">
+                                                🔴 Keluar
+                                              </span>
+                                            )}
+                                          </td>
+
+                                          <td className="py-2.5 px-4">
+                                            {log.kategori && log.kategori !== '-' ? (
+                                              <div className="flex flex-wrap items-center gap-1.5">
+                                                <span className="px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-300 border border-indigo-500/20 text-xs font-semibold">
+                                                  {log.kategori}
+                                                </span>
+                                                {log.sub_kategori &&
+                                                  log.sub_kategori !== '-' && (
+                                                    <span className="text-xs text-slate-400">
+                                                      › {log.sub_kategori}
+                                                    </span>
+                                                  )}
+                                              </div>
+                                            ) : (
+                                              <span className="text-xs text-slate-600">-</span>
+                                            )}
+                                          </td>
+
+                                          <td className="py-2.5 px-4 font-semibold text-white">
+                                            {log.nama || '-'}
+                                          </td>
+
+                                          <td className="py-2.5 px-4 font-mono text-xs text-cyan-400">
+                                            {log.sn || '-'}
+                                          </td>
+
+                                          <td className="py-2.5 px-4 font-bold text-emerald-400">
+                                            {log.qty || 0} Unit
+                                          </td>
+
+                                          {userRole !== 'viewer' && (
+                                            <td className="py-2.5 px-4 text-center flex items-center justify-center gap-1.5">
+                                              {isPinjam && (
+                                                <button
+                                                  onClick={() => openReturnModal(log)}
+                                                  className="px-2.5 py-1 bg-amber-500/10 hover:bg-amber-500 text-amber-400 hover:text-white rounded-lg text-xs font-medium border border-amber-500/20 transition-all"
+                                                  title="Kembalikan Stok Barang Pinjaman"
+                                                >
+                                                  ↩ Balik
+                                                </button>
+                                              )}
+
+                                              <button
+                                                onClick={() => openEditModal(log)}
+                                                className="px-2.5 py-1 bg-indigo-500/10 hover:bg-indigo-600 text-indigo-400 hover:text-white rounded-lg text-xs font-medium border border-indigo-500/20 transition-all"
+                                                title="Edit Item Ini"
+                                              >
+                                                ✏️ Edit
+                                              </button>
+
+                                              <button
+                                                onClick={() => handleDelete(log)}
+                                                className="px-2.5 py-1 bg-rose-500/10 hover:bg-rose-500 text-rose-400 hover:text-white rounded-lg text-xs font-medium border border-rose-500/20 transition-all"
+                                              >
+                                                Hapus
+                                              </button>
+                                            </td>
+                                          )}
+                                        </tr>
+                                      );
+                                    })}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </>
         )}
@@ -1974,7 +2263,7 @@ export default function App() {
               <div className="flex items-center gap-2">
                 <span className="text-lg">✏️</span>
                 <h3 className="text-lg font-bold text-white">
-                  Edit Transaksi #{editModal.id}
+                  Edit Item #{editModal.id}
                 </h3>
               </div>
               <button
@@ -1986,6 +2275,48 @@ export default function App() {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-left">
+              <div>
+                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">
+                  No. Surat Jalan
+                </label>
+                <input
+                  type="text"
+                  value={editModal.asal}
+                  onChange={(e) =>
+                    setEditModal({ ...editModal, asal: e.target.value })
+                  }
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 focus:outline-none focus:border-indigo-500 text-sm"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">
+                  PT / Perusahaan
+                </label>
+                <input
+                  type="text"
+                  value={editModal.perusahaan}
+                  onChange={(e) =>
+                    setEditModal({ ...editModal, perusahaan: e.target.value })
+                  }
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 focus:outline-none focus:border-indigo-500 text-sm"
+                />
+              </div>
+
+              <div className="md:col-span-2">
+                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">
+                  Alamat
+                </label>
+                <input
+                  type="text"
+                  value={editModal.alamat}
+                  onChange={(e) =>
+                    setEditModal({ ...editModal, alamat: e.target.value })
+                  }
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 focus:outline-none focus:border-indigo-500 text-sm"
+                />
+              </div>
+
               <div>
                 <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">
                   Kategori
@@ -2023,7 +2354,7 @@ export default function App() {
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 disabled:opacity-50 focus:outline-none focus:border-indigo-500 text-sm"
                 >
                   <option value="">-- Pilih Sub-Kategori --</option>
-                  {editSubCategories.map((sub) => (
+                  {getSubCategoriesFor(editModal.kategori).map((sub) => (
                     <option key={sub} value={sub}>
                       {sub}
                     </option>
@@ -2033,13 +2364,13 @@ export default function App() {
 
               <div>
                 <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">
-                  Surat Jalan / Asal
+                  Nama Barang
                 </label>
                 <input
                   type="text"
-                  value={editModal.asal}
+                  value={editModal.nama}
                   onChange={(e) =>
-                    setEditModal({ ...editModal, asal: e.target.value })
+                    setEditModal({ ...editModal, nama: e.target.value })
                   }
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 focus:outline-none focus:border-indigo-500 text-sm"
                 />
@@ -2054,20 +2385,6 @@ export default function App() {
                   value={editModal.sn}
                   onChange={(e) =>
                     setEditModal({ ...editModal, sn: e.target.value })
-                  }
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 focus:outline-none focus:border-indigo-500 text-sm"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">
-                  Nama Barang
-                </label>
-                <input
-                  type="text"
-                  value={editModal.nama}
-                  onChange={(e) =>
-                    setEditModal({ ...editModal, nama: e.target.value })
                   }
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 focus:outline-none focus:border-indigo-500 text-sm"
                 />
@@ -2101,7 +2418,7 @@ export default function App() {
                 />
               </div>
 
-              <div>
+              <div className="md:col-span-2">
                 <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">
                   Ganti Foto (Opsional)
                 </label>
@@ -2180,6 +2497,12 @@ export default function App() {
               <p>
                 <strong className="text-slate-400">Nama Barang:</strong>{' '}
                 <span className="text-white font-bold">{returnModal.log?.nama}</span>
+              </p>
+              <p>
+                <strong className="text-slate-400">Serial Number:</strong>{' '}
+                <span className="text-cyan-400 font-mono">
+                  {returnModal.log?.sn || '-'}
+                </span>
               </p>
               <p>
                 <strong className="text-slate-400">Jumlah Dipinjam:</strong>{' '}
