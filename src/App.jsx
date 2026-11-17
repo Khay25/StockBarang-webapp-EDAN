@@ -43,7 +43,10 @@ export default function App() {
     tanggal: new Date().toISOString().split('T')[0],
     ket: '',
     foto_url: '',
-    status_keluar: 'Keluar Permanen',
+    status_masuk: 'Stock',
+    status_keluar: 'Penjualan',
+    pinjam_mulai: new Date().toISOString().split('T')[0],
+    pinjam_selesai: '',
   });
 
   // Daftar Barang & SN di dalam 1 Surat Jalan
@@ -131,6 +134,56 @@ export default function App() {
     { value: '10', label: 'November' },
     { value: '11', label: 'Desember' },
   ];
+
+  // Helper parse status dari kolom ket
+  const parseStatusFromKet = (log) => {
+    const ket = log.ket || '';
+    const isMasuk = log.tipe === 'Barang Masuk';
+
+    if (ket.includes('[DIPINJAM') || ket.includes('[PINJAM (DEMO)')) {
+      const dateMatch = ket.match(/\(([^)]+)\)/);
+      return {
+        code: 'pinjam',
+        label: '🟡 Pinjam (Demo)',
+        period: dateMatch ? dateMatch[1] : '',
+        badgeClass: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
+      };
+    }
+
+    if (ket.includes('[SERVICE]')) {
+      return {
+        code: 'service',
+        label: '🔧 Service',
+        period: '',
+        badgeClass: 'bg-violet-500/10 text-violet-400 border-violet-500/20',
+      };
+    }
+
+    if (ket.includes('[DIKEMBALIKAN')) {
+      return {
+        code: 'dikembalikan',
+        label: '✅ Dikembalikan',
+        period: '',
+        badgeClass: 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20',
+      };
+    }
+
+    if (isMasuk) {
+      return {
+        code: 'stock',
+        label: '🟢 Stock',
+        period: '',
+        badgeClass: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
+      };
+    }
+
+    return {
+      code: 'penjualan',
+      label: '🔴 Penjualan',
+      period: '',
+      badgeClass: 'bg-rose-500/10 text-rose-400 border-rose-500/20',
+    };
+  };
 
   // --- DETEKSI ROLE USER ---
   const getRoleByUser = (user) => {
@@ -230,6 +283,29 @@ export default function App() {
       setEndDate('');
       setOnlyPinjam(false);
       setFileSizeInfo({ original: '', compressed: '' });
+      const today = new Date().toISOString().split('T')[0];
+      setSjHeader({
+        asal: '',
+        perusahaan: '',
+        alamat: '',
+        tanggal: today,
+        ket: '',
+        foto_url: '',
+        status_masuk: 'Stock',
+        status_keluar: 'Penjualan',
+        pinjam_mulai: today,
+        pinjam_selesai: '',
+      });
+      setItemsList([
+        {
+          id: Date.now(),
+          kategori: '',
+          sub_kategori: '',
+          nama: '',
+          sn: '',
+          qty: '',
+        },
+      ]);
     }
   }, [activeTab, session]);
 
@@ -300,6 +376,125 @@ export default function App() {
       )
       .map((item) => item.sub_kategori?.trim())
       .filter(Boolean);
+  };
+
+  // --- DATA BARANG & SN UNTUK AUTOCOMPLETE / DROPDOWN TAB BARANG KELUAR ---
+  const availableStockSummary = useMemo(() => {
+    const itemMap = new Map();
+    const snBalanceMap = new Map();
+
+    allLogs.forEach((log) => {
+      const nama = (log.nama || '').trim();
+      if (!nama) return;
+      const namaKey = nama.toLowerCase();
+      const qty = Number(log.qty) || 0;
+      const isMasuk = log.tipe === 'Barang Masuk';
+
+      if (!itemMap.has(namaKey)) {
+        itemMap.set(namaKey, {
+          nama,
+          kategori: log.kategori && log.kategori !== '-' ? log.kategori : '',
+          sub_kategori:
+            log.sub_kategori && log.sub_kategori !== '-' ? log.sub_kategori : '',
+          totalQty: 0,
+        });
+      }
+
+      const info = itemMap.get(namaKey);
+      info.totalQty += isMasuk ? qty : -qty;
+      if (!info.kategori && log.kategori && log.kategori !== '-') {
+        info.kategori = log.kategori;
+      }
+      if (!info.sub_kategori && log.sub_kategori && log.sub_kategori !== '-') {
+        info.sub_kategori = log.sub_kategori;
+      }
+
+      const sn = (log.sn || '').trim();
+      if (sn && sn !== '-') {
+        const snKey = `${namaKey}__${sn.toLowerCase()}`;
+        const prev = snBalanceMap.get(snKey) || {
+          nama,
+          namaKey,
+          sn,
+          kategori: info.kategori,
+          sub_kategori: info.sub_kategori,
+          qty: 0,
+        };
+        prev.qty += isMasuk ? qty : -qty;
+        if (log.kategori && log.kategori !== '-') prev.kategori = log.kategori;
+        if (log.sub_kategori && log.sub_kategori !== '-') {
+          prev.sub_kategori = log.sub_kategori;
+        }
+        snBalanceMap.set(snKey, prev);
+      }
+    });
+
+    // Tampilkan semua item & SN tanpa filter habis / tanpa notif sisa stok
+    const availableItems = Array.from(itemMap.values());
+    const availableSNs = Array.from(snBalanceMap.values());
+
+    return { availableItems, availableSNs, snBalanceMap, itemMap };
+  }, [allLogs]);
+
+  // Daftar Surat Jalan Barang Masuk untuk Autocomplete & Auto-Fill di Tab Keluar
+  const incomingSJMap = useMemo(() => {
+    const map = new Map();
+    allLogs
+      .filter((log) => log.tipe === 'Barang Masuk' && log.asal && log.asal !== '-')
+      .forEach((log) => {
+        const sjKey = log.asal.trim().toLowerCase();
+        if (!map.has(sjKey)) {
+          map.set(sjKey, {
+            sj: log.asal.trim(),
+            perusahaan: log.perusahaan && log.perusahaan !== '-' ? log.perusahaan : '',
+            alamat: log.alamat && log.alamat !== '-' ? log.alamat : '',
+            items: [],
+          });
+        }
+        const entry = map.get(sjKey);
+        if (!entry.perusahaan && log.perusahaan && log.perusahaan !== '-') {
+          entry.perusahaan = log.perusahaan;
+        }
+        if (!entry.alamat && log.alamat && log.alamat !== '-') {
+          entry.alamat = log.alamat;
+        }
+        entry.items.push(log);
+      });
+    return map;
+  }, [allLogs]);
+
+  // Handler saat No. Surat Jalan diketik / dipilih di Tab Barang Keluar
+  const handleSJNumberChange = (val) => {
+    setSjHeader((prev) => ({ ...prev, asal: val }));
+
+    if (activeTab !== 'keluar') return;
+
+    const matchedSJ = incomingSJMap.get(val.trim().toLowerCase());
+    if (matchedSJ) {
+      const autoRows = matchedSJ.items.map((srcItem) => ({
+        id: Date.now() + Math.random(),
+        kategori:
+          srcItem.kategori && srcItem.kategori !== '-' ? srcItem.kategori : '',
+        sub_kategori:
+          srcItem.sub_kategori && srcItem.sub_kategori !== '-'
+            ? srcItem.sub_kategori
+            : '',
+        nama: (srcItem.nama || '').trim(),
+        sn: srcItem.sn && srcItem.sn !== '-' ? srcItem.sn.trim() : '',
+        qty: String(srcItem.qty || 1),
+      }));
+
+      setSjHeader((prev) => ({
+        ...prev,
+        asal: val,
+        perusahaan: matchedSJ.perusahaan || prev.perusahaan,
+        alamat: matchedSJ.alamat || prev.alamat,
+      }));
+
+      if (autoRows.length > 0) {
+        setItemsList(autoRows);
+      }
+    }
   };
 
   const handleSaveNewKategori = async () => {
@@ -427,9 +622,51 @@ export default function App() {
     setItemsList((prev) =>
       prev.map((row) => {
         if (row.id !== rowId) return row;
+
         if (field === 'kategori') {
-          return { ...row, kategori: value, sub_kategori: '' };
+          return {
+            ...row,
+            kategori: value,
+            sub_kategori: '',
+            ...(activeTab === 'keluar' ? { nama: '', sn: '', qty: '' } : {}),
+          };
         }
+
+        if (field === 'sub_kategori') {
+          return {
+            ...row,
+            sub_kategori: value,
+            ...(activeTab === 'keluar' ? { nama: '', sn: '', qty: '' } : {}),
+          };
+        }
+
+        if (field === 'nama' && activeTab === 'keluar') {
+          const stockInfo = availableStockSummary.itemMap.get(
+            value.trim().toLowerCase()
+          );
+          return {
+            ...row,
+            nama: value,
+            kategori: stockInfo?.kategori || row.kategori,
+            sub_kategori: stockInfo?.sub_kategori || row.sub_kategori,
+            sn: '',
+            qty: '1',
+          };
+        }
+
+        if (field === 'sn' && activeTab === 'keluar') {
+          const snInfo = availableStockSummary.snBalanceMap.get(
+            `${row.nama.trim().toLowerCase()}__${value.trim().toLowerCase()}`
+          );
+          return {
+            ...row,
+            sn: value,
+            kategori: snInfo?.kategori || row.kategori,
+            sub_kategori: snInfo?.sub_kategori || row.sub_kategori,
+            qty: row.qty || '1',
+          };
+        }
+
         return { ...row, [field]: value };
       })
     );
@@ -533,59 +770,32 @@ export default function App() {
       }
     }
 
-    if (activeTab === 'keluar') {
-      const requestedMap = new Map();
-      itemsList.forEach((row) => {
-        const key = row.nama.trim().toLowerCase();
-        const qty = parseInt(row.qty, 10) || 0;
-        requestedMap.set(key, {
-          displayName: row.nama.trim(),
-          totalReq: (requestedMap.get(key)?.totalReq || 0) + qty,
-        });
-      });
+    const activeStatus =
+      activeTab === 'masuk' ? sjHeader.status_masuk : sjHeader.status_keluar;
 
-      for (const [targetName, info] of requestedMap.entries()) {
-        const totalMasuk = allLogs
-          .filter(
-            (item) =>
-              item.tipe === 'Barang Masuk' &&
-              item.nama?.trim().toLowerCase() === targetName
-          )
-          .reduce((sum, item) => sum + (Number(item.qty) || 0), 0);
-
-        const totalKeluar = allLogs
-          .filter(
-            (item) =>
-              item.tipe === 'Barang Keluar' &&
-              item.nama?.trim().toLowerCase() === targetName
-          )
-          .reduce((sum, item) => sum + (Number(item.qty) || 0), 0);
-
-        const sisaStok = totalMasuk - totalKeluar;
-
-        if (sisaStok <= 0) {
-          showAlert(
-            'Stok Tidak Tersedia!',
-            `Barang "${info.displayName}" tidak ada di gudang atau stok saat ini 0 unit.`,
-            'danger'
-          );
-          return;
-        }
-
-        if (info.totalReq > sisaStok) {
-          showAlert(
-            'Stok Tidak Mencukupi!',
-            `Total permintaan "${info.displayName}" (${info.totalReq} Unit) melebihi sisa stok gudang (${sisaStok} Unit).`,
-            'danger'
-          );
-          return;
-        }
-      }
+    if (activeStatus === 'Pinjam (Demo)' && !sjHeader.pinjam_mulai) {
+      showAlert(
+        'Tanggal Pinjam Belum Diisi',
+        'Silakan isi tanggal Mulai Pinjam (Demo)!',
+        'danger'
+      );
+      return;
     }
 
     let finalKet = sjHeader.ket.trim();
-    if (activeTab === 'keluar' && sjHeader.status_keluar === 'Pinjam') {
-      finalKet = `[DIPINJAM] ${finalKet}`.trim();
+    const periodePinjam =
+      sjHeader.pinjam_mulai || sjHeader.pinjam_selesai
+        ? ` (${sjHeader.pinjam_mulai || '?'} s/d ${sjHeader.pinjam_selesai || '?'})`
+        : '';
+
+    if (activeStatus === 'Pinjam (Demo)') {
+      finalKet = `[DIPINJAM] [PINJAM (DEMO)${periodePinjam}] ${finalKet}`.trim();
+    } else if (activeStatus === 'Service') {
+      finalKet = `[SERVICE] ${finalKet}`.trim();
+    } else if (activeTab === 'masuk' && activeStatus === 'Stock') {
+      finalKet = `[STOCK] ${finalKet}`.trim();
+    } else if (activeTab === 'keluar' && activeStatus === 'Penjualan') {
+      finalKet = `[PENJUALAN] ${finalKet}`.trim();
     }
 
     const tipeTransaksi = activeTab === 'masuk' ? 'Barang Masuk' : 'Barang Keluar';
@@ -617,17 +827,23 @@ export default function App() {
 
       await recordAudit(
         'TAMBAH',
-        `Menambah ${tipeTransaksi} [SJ: ${sjValue} | PT: ${sjHeader.perusahaan || '-'}]: ${ringkasanBarang}`
+        `Menambah ${tipeTransaksi} [${activeStatus}] [SJ: ${sjValue} | PT: ${
+          sjHeader.perusahaan || '-'
+        }]: ${ringkasanBarang}`
       );
 
+      const today = new Date().toISOString().split('T')[0];
       setSjHeader({
         asal: '',
         perusahaan: '',
         alamat: '',
-        tanggal: new Date().toISOString().split('T')[0],
+        tanggal: today,
         ket: '',
         foto_url: '',
-        status_keluar: 'Keluar Permanen',
+        status_masuk: 'Stock',
+        status_keluar: 'Penjualan',
+        pinjam_mulai: today,
+        pinjam_selesai: '',
       });
       setItemsList([
         {
@@ -722,7 +938,10 @@ export default function App() {
     const tglKembali = returnModal.returnDate;
     if (!log) return;
 
-    const cleanKet = (log.ket || '').replace('[DIPINJAM]', '').trim();
+    const cleanKet = (log.ket || '')
+      .replace('[DIPINJAM]', '')
+      .replace(/\[PINJAM \(DEMO\)[^\]]*\]/g, '')
+      .trim();
     const updatedKet = `[DIKEMBALIKAN: ${tglKembali}] ${cleanKet}`.trim();
 
     const { error: updateError } = await supabase
@@ -746,7 +965,7 @@ export default function App() {
       nama: log.nama,
       qty: parseInt(log.qty, 10) || 0,
       tanggal: tglKembali,
-      ket: `Pengembalian barang dipinjam tgl ${log.tanggal}`,
+      ket: `[STOCK] Pengembalian barang dipinjam tgl ${log.tanggal}`,
       foto_url: log.foto_url || '',
     };
 
@@ -807,15 +1026,23 @@ export default function App() {
   const handlePrintSJGroupPDF = (sjGroup) => {
     const printWindow = window.open('', '_blank');
     const firstItem = sjGroup.items[0];
-    const isPinjam = sjGroup.items.some((it) => it.ket?.includes('[DIPINJAM]'));
+    const statusInfo = parseStatusFromKet(firstItem);
     const badgeText =
       firstItem.tipe === 'Barang Masuk'
-        ? 'BUKTI BARANG MASUK'
-        : isPinjam
-        ? 'SURAT PEMINJAMAN BARANG'
-        : 'BUKTI BARANG KELUAR';
+        ? `BUKTI BARANG MASUK (${statusInfo.code.toUpperCase()})`
+        : statusInfo.code === 'pinjam'
+        ? 'SURAT PINJAM (DEMO) BARANG'
+        : statusInfo.code === 'service'
+        ? 'SURAT JALAN SERVICE BARANG'
+        : 'BUKTI PENJUALAN / BARANG KELUAR';
     const badgeColor =
-      firstItem.tipe === 'Barang Masuk' ? '#059669' : isPinjam ? '#d97706' : '#e11d48';
+      statusInfo.code === 'pinjam'
+        ? '#d97706'
+        : statusInfo.code === 'service'
+        ? '#7c3aed'
+        : firstItem.tipe === 'Barang Masuk'
+        ? '#059669'
+        : '#e11d48';
 
     const itemsRowsHtml = sjGroup.items
       .map(
@@ -949,7 +1176,8 @@ export default function App() {
         log.perusahaan?.toLowerCase().includes(keyword) ||
         log.alamat?.toLowerCase().includes(keyword) ||
         log.kategori?.toLowerCase().includes(keyword) ||
-        log.sub_kategori?.toLowerCase().includes(keyword);
+        log.sub_kategori?.toLowerCase().includes(keyword) ||
+        log.ket?.toLowerCase().includes(keyword);
 
       let matchMonth = true;
       if (selectedMonth !== 'all' && log.tanggal) {
@@ -971,13 +1199,14 @@ export default function App() {
       }
 
       let matchPinjam = true;
-      if (activeTab === 'keluar' && onlyPinjam) {
-        matchPinjam = log.ket?.includes('[DIPINJAM]');
+      if (onlyPinjam) {
+        matchPinjam =
+          log.ket?.includes('[DIPINJAM]') || log.ket?.includes('[PINJAM (DEMO)');
       }
 
       return matchSearch && matchMonth && matchKategori && matchDateRange && matchPinjam;
     });
-  }, [logs, search, selectedMonth, selectedKategoriFilter, startDate, endDate, activeTab, onlyPinjam]);
+  }, [logs, search, selectedMonth, selectedKategoriFilter, startDate, endDate, onlyPinjam]);
 
   const filteredAuditLogs = useMemo(() => {
     return auditLogs.filter((a) => {
@@ -1196,7 +1425,9 @@ export default function App() {
   const sisaSedangDipinjam = useMemo(() => {
     return allLogs
       .filter(
-        (item) => item.tipe === 'Barang Keluar' && item.ket?.includes('[DIPINJAM]')
+        (item) =>
+          item.tipe === 'Barang Keluar' &&
+          (item.ket?.includes('[DIPINJAM]') || item.ket?.includes('[PINJAM (DEMO)'))
       )
       .reduce((sum, item) => sum + (Number(item.qty) || 0), 0);
   }, [allLogs]);
@@ -1217,6 +1448,9 @@ export default function App() {
   if (!session) {
     return <Login onLoginSuccess={(newSession) => setSession(newSession)} />;
   }
+
+  const currentActiveStatus =
+    activeTab === 'masuk' ? sjHeader.status_masuk : sjHeader.status_keluar;
 
   return (
     <div className="min-h-screen bg-[#0b0f19] text-slate-100 p-4 md:p-8 font-sans">
@@ -1640,7 +1874,6 @@ export default function App() {
                       </button>
                     </div>
 
-                    {/* Daftar Kategori Tersimpan (Edit & Hapus) */}
                     {kategoriList.length > 0 && (
                       <div className="max-h-56 overflow-y-auto rounded-xl border border-slate-800 divide-y divide-slate-800/70">
                         {kategoriList.map((item) => (
@@ -1729,12 +1962,14 @@ export default function App() {
                 <form onSubmit={handleSubmit} className="space-y-6">
                   {/* SECTION 1: INFO SURAT JALAN (1 SJ UNTUK SEMUA BARANG DI BAWAH) */}
                   <div className="p-4 rounded-xl bg-slate-950/60 border border-slate-800/80 space-y-4">
-                    <div className="flex items-center justify-between">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
                       <span className="text-xs font-bold uppercase tracking-wider text-emerald-400">
                         1. Informasi Surat Jalan &amp; Tujuan / Asal
                       </span>
                       <span className="text-[11px] text-slate-500">
-                        1 Surat Jalan berlaku untuk seluruh barang di bawah
+                        {activeTab === 'keluar'
+                          ? '💡 Ketik/pilih No. SJ Barang Masuk untuk isi otomatis daftar barang & SN'
+                          : '1 Surat Jalan berlaku untuk seluruh barang di bawah'}
                       </span>
                     </div>
 
@@ -1746,13 +1981,26 @@ export default function App() {
                         <input
                           type="text"
                           required
+                          list={activeTab === 'keluar' ? 'incoming-sj-list' : undefined}
                           value={sjHeader.asal}
-                          onChange={(e) =>
-                            setSjHeader({ ...sjHeader, asal: e.target.value })
-                          }
+                          onChange={(e) => handleSJNumberChange(e.target.value)}
                           className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-slate-200 focus:outline-none focus:border-indigo-500 transition-all text-sm"
-                          placeholder="Contoh: 736.SJKB.2026.29.10-1"
+                          placeholder={
+                            activeTab === 'keluar'
+                              ? 'Ketik/pilih No. SJ (auto-isi jika ada di Masuk)'
+                              : 'Contoh: 736.SJKB.2026.29.10-1'
+                          }
                         />
+                        {activeTab === 'keluar' && (
+                          <datalist id="incoming-sj-list">
+                            {Array.from(incomingSJMap.values()).map((sjObj) => (
+                              <option
+                                key={sjObj.sj}
+                                value={sjObj.sj}
+                              >{`${sjObj.sj}${sjObj.perusahaan ? ` - ${sjObj.perusahaan}` : ''}`}</option>
+                            ))}
+                          </datalist>
+                        )}
                       </div>
 
                       <div>
@@ -1799,11 +2047,33 @@ export default function App() {
                         />
                       </div>
 
-                      {activeTab === 'keluar' ? (
-                        <div>
-                          <label className="block text-xs font-semibold text-amber-400 uppercase tracking-wider mb-1.5">
-                            Status Transaksi Keluar
-                          </label>
+                      {/* STATUS TRANSAKSI (MASUK MAUPUN KELUAR) */}
+                      <div>
+                        <label
+                          className={`block text-xs font-semibold uppercase tracking-wider mb-1.5 ${
+                            activeTab === 'masuk' ? 'text-emerald-400' : 'text-amber-400'
+                          }`}
+                        >
+                          {activeTab === 'masuk'
+                            ? 'Status Transaksi Masuk'
+                            : 'Status Transaksi Keluar'}
+                        </label>
+                        {activeTab === 'masuk' ? (
+                          <select
+                            value={sjHeader.status_masuk}
+                            onChange={(e) =>
+                              setSjHeader({
+                                ...sjHeader,
+                                status_masuk: e.target.value,
+                              })
+                            }
+                            className="w-full bg-slate-900 border border-emerald-500/40 rounded-xl px-4 py-2.5 text-emerald-300 focus:outline-none focus:border-emerald-500 transition-all text-sm font-semibold"
+                          >
+                            <option value="Stock">🟢 Stock</option>
+                            <option value="Pinjam (Demo)">🟡 Pinjam (Demo)</option>
+                            <option value="Service">🔧 Service</option>
+                          </select>
+                        ) : (
                           <select
                             value={sjHeader.status_keluar}
                             onChange={(e) =>
@@ -1814,41 +2084,66 @@ export default function App() {
                             }
                             className="w-full bg-slate-900 border border-amber-500/40 rounded-xl px-4 py-2.5 text-amber-300 focus:outline-none focus:border-amber-500 transition-all text-sm font-semibold"
                           >
-                            <option value="Keluar Permanen">
-                              🔴 Keluar Permanen (Dijual/Pakai)
-                            </option>
-                            <option value="Pinjam">🟡 Pinjam (Sementara)</option>
+                            <option value="Penjualan">🔴 Penjualan</option>
+                            <option value="Pinjam (Demo)">🟡 Pinjam (Demo)</option>
+                            <option value="Service">🔧 Service</option>
                           </select>
-                        </div>
-                      ) : (
-                        <div>
-                          <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
-                            Foto Surat Jalan / Barang
-                          </label>
-                          <input
-                            type="file"
-                            accept="image/*"
-                            onChange={(e) => handleFileUpload(e, false)}
-                            className="w-full text-sm text-slate-400 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-slate-800 file:text-slate-200 hover:file:bg-slate-700 cursor-pointer"
-                          />
+                        )}
+                      </div>
+
+                      {/* BOX TANGGAL MULAI & SELESAI PINJAM (DEMO) */}
+                      {currentActiveStatus === 'Pinjam (Demo)' && (
+                        <div className="md:col-span-3 p-3.5 rounded-xl bg-amber-500/5 border border-amber-500/30 grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-xs font-semibold text-amber-400 uppercase tracking-wider mb-1.5">
+                              Mulai Pinjam (Demo) *
+                            </label>
+                            <input
+                              type="date"
+                              required
+                              value={sjHeader.pinjam_mulai}
+                              onChange={(e) =>
+                                setSjHeader({
+                                  ...sjHeader,
+                                  pinjam_mulai: e.target.value,
+                                })
+                              }
+                              className="w-full bg-slate-900 border border-amber-500/40 rounded-xl px-4 py-2 text-slate-200 focus:outline-none focus:border-amber-400 text-sm"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block text-xs font-semibold text-amber-400 uppercase tracking-wider mb-1.5">
+                              Selesai Pinjam (Demo)
+                            </label>
+                            <input
+                              type="date"
+                              value={sjHeader.pinjam_selesai}
+                              onChange={(e) =>
+                                setSjHeader({
+                                  ...sjHeader,
+                                  pinjam_selesai: e.target.value,
+                                })
+                              }
+                              className="w-full bg-slate-900 border border-amber-500/40 rounded-xl px-4 py-2 text-slate-200 focus:outline-none focus:border-amber-400 text-sm"
+                            />
+                          </div>
                         </div>
                       )}
 
-                      {activeTab === 'keluar' && (
-                        <div>
-                          <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
-                            Foto Surat Jalan / Barang
-                          </label>
-                          <input
-                            type="file"
-                            accept="image/*"
-                            onChange={(e) => handleFileUpload(e, false)}
-                            className="w-full text-sm text-slate-400 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-slate-800 file:text-slate-200 hover:file:bg-slate-700 cursor-pointer"
-                          />
-                        </div>
-                      )}
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
+                          Foto Surat Jalan / Barang
+                        </label>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={(e) => handleFileUpload(e, false)}
+                          className="w-full text-sm text-slate-400 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-slate-800 file:text-slate-200 hover:file:bg-slate-700 cursor-pointer"
+                        />
+                      </div>
 
-                      <div className={activeTab === 'keluar' ? 'md:col-span-2' : 'md:col-span-3'}>
+                      <div className="md:col-span-2">
                         <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
                           Keterangan Surat Jalan
                         </label>
@@ -1860,8 +2155,10 @@ export default function App() {
                           }
                           className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-slate-200 focus:outline-none focus:border-indigo-500 transition-all text-sm"
                           placeholder={
-                            activeTab === 'keluar' && sjHeader.status_keluar === 'Pinjam'
-                              ? 'Peminjam, tujuan, estimasi balik, dll'
+                            currentActiveStatus === 'Pinjam (Demo)'
+                              ? 'Nama peminjam / RS / tujuan demo, dll'
+                              : currentActiveStatus === 'Service'
+                              ? 'Keluhan unit / teknisi / keterangan service'
                               : 'Catatan atau keterangan tambahan untuk Surat Jalan ini'
                           }
                         />
@@ -1916,6 +2213,37 @@ export default function App() {
                       {itemsList.map((row, index) => {
                         const rowTipeList = getTipeBarangFor(row.kategori);
 
+                        const filteredAvailableItems =
+                          activeTab === 'keluar'
+                            ? availableStockSummary.availableItems.filter((it) => {
+                                if (
+                                  row.kategori &&
+                                  it.kategori &&
+                                  it.kategori.toLowerCase() !==
+                                    row.kategori.toLowerCase()
+                                ) {
+                                  return false;
+                                }
+                                if (
+                                  row.sub_kategori &&
+                                  it.sub_kategori &&
+                                  it.sub_kategori.toLowerCase() !==
+                                    row.sub_kategori.toLowerCase()
+                                ) {
+                                  return false;
+                                }
+                                return true;
+                              })
+                            : [];
+
+                        const availableSNsForRow =
+                          activeTab === 'keluar' && row.nama
+                            ? availableStockSummary.availableSNs.filter(
+                                (s) =>
+                                  s.namaKey === row.nama.trim().toLowerCase()
+                              )
+                            : [];
+
                         return (
                           <div
                             key={row.id}
@@ -1932,7 +2260,11 @@ export default function App() {
                                 }
                                 className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
                               >
-                                <option value="">-- Kategori --</option>
+                                <option value="">
+                                  {activeTab === 'keluar'
+                                    ? '-- Semua Kategori --'
+                                    : '-- Kategori --'}
+                                </option>
                                 {uniqueCategories.map((kat) => (
                                   <option key={kat} value={kat}>
                                     {kat}
@@ -1970,31 +2302,78 @@ export default function App() {
                               <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
                                 Nama Barang *
                               </label>
-                              <input
-                                type="text"
-                                required
-                                value={row.nama}
-                                onChange={(e) =>
-                                  handleItemRowChange(row.id, 'nama', e.target.value)
-                                }
-                                placeholder="Nama barang"
-                                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
-                              />
+                              {activeTab === 'keluar' ? (
+                                <select
+                                  required
+                                  value={row.nama}
+                                  onChange={(e) =>
+                                    handleItemRowChange(row.id, 'nama', e.target.value)
+                                  }
+                                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
+                                >
+                                  <option value="">-- Pilih Nama Barang --</option>
+                                  {filteredAvailableItems.map((it) => (
+                                    <option key={it.nama} value={it.nama}>
+                                      {it.nama}
+                                    </option>
+                                  ))}
+                                </select>
+                              ) : (
+                                <input
+                                  type="text"
+                                  required
+                                  value={row.nama}
+                                  onChange={(e) =>
+                                    handleItemRowChange(row.id, 'nama', e.target.value)
+                                  }
+                                  placeholder="Nama barang"
+                                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
+                                />
+                              )}
                             </div>
 
                             <div className="md:col-span-3">
                               <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
                                 Serial Number (SN)
                               </label>
-                              <input
-                                type="text"
-                                value={row.sn}
-                                onChange={(e) =>
-                                  handleItemRowChange(row.id, 'sn', e.target.value)
-                                }
-                                placeholder="SN unik barang ini"
-                                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs font-mono text-cyan-300 focus:outline-none focus:border-indigo-500"
-                              />
+                              {activeTab === 'keluar' ? (
+                                availableSNsForRow.length > 0 ? (
+                                  <select
+                                    value={row.sn}
+                                    onChange={(e) =>
+                                      handleItemRowChange(row.id, 'sn', e.target.value)
+                                    }
+                                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs font-mono text-cyan-300 focus:outline-none focus:border-indigo-500"
+                                  >
+                                    <option value="">-- Pilih Serial Number --</option>
+                                    {availableSNsForRow.map((snObj) => (
+                                      <option key={snObj.sn} value={snObj.sn}>
+                                        {snObj.sn}
+                                      </option>
+                                    ))}
+                                  </select>
+                                ) : (
+                                  <input
+                                    type="text"
+                                    value={row.sn}
+                                    onChange={(e) =>
+                                      handleItemRowChange(row.id, 'sn', e.target.value)
+                                    }
+                                    placeholder="Serial Number (opsional)"
+                                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs font-mono text-cyan-300 focus:outline-none focus:border-indigo-500"
+                                  />
+                                )
+                              ) : (
+                                <input
+                                  type="text"
+                                  value={row.sn}
+                                  onChange={(e) =>
+                                    handleItemRowChange(row.id, 'sn', e.target.value)
+                                  }
+                                  placeholder="SN unik barang ini"
+                                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs font-mono text-cyan-300 focus:outline-none focus:border-indigo-500"
+                                />
+                              )}
                             </div>
 
                             <div className="md:col-span-1">
@@ -2034,19 +2413,16 @@ export default function App() {
                   <button
                     type="submit"
                     className={`w-full py-3.5 px-6 rounded-xl font-semibold text-white shadow-lg transition-all ${
-                      activeTab === 'masuk'
-                        ? 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-950/50'
-                        : sjHeader.status_keluar === 'Pinjam'
+                      currentActiveStatus === 'Pinjam (Demo)'
                         ? 'bg-amber-600 hover:bg-amber-500 shadow-amber-950/50'
+                        : currentActiveStatus === 'Service'
+                        ? 'bg-violet-600 hover:bg-violet-500 shadow-violet-950/50'
+                        : activeTab === 'masuk'
+                        ? 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-950/50'
                         : 'bg-rose-600 hover:bg-rose-500 shadow-rose-950/50'
                     }`}
                   >
-                    Simpan Surat Jalan ({itemsList.length} Barang) —{' '}
-                    {activeTab === 'masuk'
-                      ? 'Barang Masuk'
-                      : sjHeader.status_keluar === 'Pinjam'
-                      ? 'Pinjaman Barang'
-                      : 'Barang Keluar'}
+                    Simpan Surat Jalan ({itemsList.length} Barang) — {currentActiveStatus}
                   </button>
                 </form>
               </div>
@@ -2059,25 +2435,23 @@ export default function App() {
                   Riwayat{' '}
                   {activeTab === 'masuk'
                     ? 'Barang Masuk'
-                    : 'Barang Keluar & Pinjaman'}
+                    : 'Barang Keluar & Pinjam (Demo)'}
                 </h2>
 
                 <div className="flex flex-wrap items-center gap-3">
-                  {activeTab === 'keluar' && (
-                    <button
-                      onClick={() => setOnlyPinjam(!onlyPinjam)}
-                      className={`px-3 py-2 rounded-xl text-xs font-semibold border transition-all flex items-center gap-1.5 ${
-                        onlyPinjam
-                          ? 'bg-amber-500 text-slate-950 border-amber-400 font-bold shadow-lg shadow-amber-950/50'
-                          : 'bg-slate-950 text-amber-400 border-amber-500/30 hover:border-amber-500'
-                      }`}
-                    >
-                      <span>🟡</span>
-                      <span>
-                        {onlyPinjam ? 'Tampilkan Semua' : 'Hanya Dipinjam'}
-                      </span>
-                    </button>
-                  )}
+                  <button
+                    onClick={() => setOnlyPinjam(!onlyPinjam)}
+                    className={`px-3 py-2 rounded-xl text-xs font-semibold border transition-all flex items-center gap-1.5 ${
+                      onlyPinjam
+                        ? 'bg-amber-500 text-slate-950 border-amber-400 font-bold shadow-lg shadow-amber-950/50'
+                        : 'bg-slate-950 text-amber-400 border-amber-500/30 hover:border-amber-500'
+                    }`}
+                  >
+                    <span>🟡</span>
+                    <span>
+                      {onlyPinjam ? 'Tampilkan Semua' : 'Hanya Pinjam (Demo)'}
+                    </span>
+                  </button>
 
                   <button
                     onClick={handleExportExcel}
@@ -2280,7 +2654,7 @@ export default function App() {
                                 <table className="w-full text-left text-sm text-slate-300">
                                   <thead className="bg-slate-950/70 text-slate-400 font-semibold uppercase text-[11px] border-b border-slate-800/80">
                                     <tr>
-                                      <th className="py-2.5 px-4 w-28">Status</th>
+                                      <th className="py-2.5 px-4">Status</th>
                                       <th className="py-2.5 px-4">Kategori</th>
                                       <th className="py-2.5 px-4">Tipe Barang</th>
                                       <th className="py-2.5 px-4">Nama Barang</th>
@@ -2295,7 +2669,10 @@ export default function App() {
                                   </thead>
                                   <tbody className="divide-y divide-slate-800/50">
                                     {sjGroup.items.map((log) => {
-                                      const isPinjam = log.ket?.includes('[DIPINJAM]');
+                                      const statusObj = parseStatusFromKet(log);
+                                      const isPinjamKeluar =
+                                        log.tipe === 'Barang Keluar' &&
+                                        statusObj.code === 'pinjam';
 
                                       return (
                                         <tr
@@ -2303,19 +2680,18 @@ export default function App() {
                                           className="hover:bg-slate-800/30 transition-colors"
                                         >
                                           <td className="py-2.5 px-4">
-                                            {log.tipe === 'Barang Masuk' ? (
-                                              <span className="inline-block px-2 py-0.5 rounded-full text-[11px] font-bold whitespace-nowrap bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                                                Masuk
+                                            <div className="flex flex-col items-start gap-1">
+                                              <span
+                                                className={`inline-block px-2 py-0.5 rounded-full text-[11px] font-bold whitespace-nowrap border ${statusObj.badgeClass}`}
+                                              >
+                                                {statusObj.label}
                                               </span>
-                                            ) : isPinjam ? (
-                                              <span className="inline-block px-2 py-0.5 rounded-full text-[11px] font-bold whitespace-nowrap bg-amber-500/10 text-amber-400 border border-amber-500/20">
-                                                🟡 Pinjam
-                                              </span>
-                                            ) : (
-                                              <span className="inline-block px-2 py-0.5 rounded-full text-[11px] font-bold whitespace-nowrap bg-rose-500/10 text-rose-400 border border-rose-500/20">
-                                                🔴 Keluar
-                                              </span>
-                                            )}
+                                              {statusObj.period && (
+                                                <span className="text-[10px] text-amber-300/90 font-mono">
+                                                  {statusObj.period}
+                                                </span>
+                                              )}
+                                            </div>
                                           </td>
 
                                           <td className="py-2.5 px-4">
@@ -2352,7 +2728,7 @@ export default function App() {
 
                                           {userRole !== 'viewer' && (
                                             <td className="py-2.5 px-4 text-center flex items-center justify-center gap-1.5">
-                                              {isPinjam && (
+                                              {isPinjamKeluar && (
                                                 <button
                                                   onClick={() => openReturnModal(log)}
                                                   className="px-2.5 py-1 bg-amber-500/10 hover:bg-amber-500 text-amber-400 hover:text-white rounded-lg text-xs font-medium border border-amber-500/20 transition-all"
