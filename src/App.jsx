@@ -28,9 +28,11 @@ export default function App() {
 
   const [fileSizeInfo, setFileSizeInfo] = useState({ original: '', compressed: '' });
 
-  // State modal/form tambah kategori baru
-  const [showNewKatForm, setShowNewKatForm] = useState(false);
+  // State panel Kelola Kategori & Tipe Barang (Tambah / Edit / Hapus)
+  const [showManageKatPanel, setShowManageKatPanel] = useState(false);
   const [newKatData, setNewKatData] = useState({ kategori: '', sub_kategori: '' });
+  const [editingKatId, setEditingKatId] = useState(null);
+  const [editKatDraft, setEditKatDraft] = useState({ kategori: '', sub_kategori: '' });
   const [savingKat, setSavingKat] = useState(false);
 
   // Header Surat Jalan (1 SJ untuk banyak barang)
@@ -49,7 +51,7 @@ export default function App() {
     {
       id: Date.now(),
       kategori: '',
-      sub_kategori: '',
+      sub_kategori: '', // dipakai untuk Tipe Barang
       nama: '',
       sn: '',
       qty: '',
@@ -78,7 +80,7 @@ export default function App() {
     perusahaan: '',
     alamat: '',
     kategori: '',
-    sub_kategori: '',
+    sub_kategori: '', // dipakai untuk Tipe Barang
     sn: '',
     nama: '',
     qty: '',
@@ -281,7 +283,7 @@ export default function App() {
     setLoading(false);
   };
 
-  // --- KATEGORI & SUB-KATEGORI HELPERS ---
+  // --- KATEGORI & TIPE BARANG HELPERS ---
   const uniqueCategories = useMemo(() => {
     const setKat = new Set(
       kategoriList.map((item) => item.kategori?.trim()).filter(Boolean)
@@ -289,7 +291,7 @@ export default function App() {
     return Array.from(setKat);
   }, [kategoriList]);
 
-  const getSubCategoriesFor = (kategoriName) => {
+  const getTipeBarangFor = (kategoriName) => {
     if (!kategoriName) return [];
     return kategoriList
       .filter(
@@ -302,49 +304,103 @@ export default function App() {
 
   const handleSaveNewKategori = async () => {
     const kat = newKatData.kategori.trim();
-    const sub = newKatData.sub_kategori.trim();
-    if (!kat || !sub) {
-      showAlert('Data Belum Lengkap', 'Nama Kategori dan Sub-Kategori wajib diisi!', 'danger');
+    const tipe = newKatData.sub_kategori.trim();
+    if (!kat || !tipe) {
+      showAlert('Data Belum Lengkap', 'Nama Kategori dan Tipe Barang wajib diisi!', 'danger');
       return;
     }
 
     const exists = kategoriList.some(
       (item) =>
         item.kategori?.trim().toLowerCase() === kat.toLowerCase() &&
-        item.sub_kategori?.trim().toLowerCase() === sub.toLowerCase()
+        item.sub_kategori?.trim().toLowerCase() === tipe.toLowerCase()
     );
 
     if (exists) {
       setItemsList((prev) =>
         prev.map((row, idx) =>
-          idx === prev.length - 1 ? { ...row, kategori: kat, sub_kategori: sub } : row
+          idx === prev.length - 1 ? { ...row, kategori: kat, sub_kategori: tipe } : row
         )
       );
       setNewKatData({ kategori: '', sub_kategori: '' });
-      setShowNewKatForm(false);
       return;
     }
 
     setSavingKat(true);
     const { error } = await supabase
       .from('kategori_barang')
-      .insert([{ kategori: kat, sub_kategori: sub }]);
+      .insert([{ kategori: kat, sub_kategori: tipe }]);
 
     if (error) {
       showAlert('Gagal Menyimpan Kategori', error.message, 'danger');
     } else {
-      await recordAudit('TAMBAH', `Menambah Kategori Baru: ${kat} > ${sub}`);
+      await recordAudit('TAMBAH', `Menambah Kategori & Tipe: ${kat} > ${tipe}`);
       await fetchKategori();
       setItemsList((prev) =>
         prev.map((row, idx) =>
-          idx === prev.length - 1 ? { ...row, kategori: kat, sub_kategori: sub } : row
+          idx === prev.length - 1 ? { ...row, kategori: kat, sub_kategori: tipe } : row
         )
       );
       setNewKatData({ kategori: '', sub_kategori: '' });
-      setShowNewKatForm(false);
-      showAlert('Kategori Ditambahkan', `Kategori "${kat} > ${sub}" berhasil dibuat.`, 'success');
+      showAlert('Kategori Ditambahkan', `Kategori "${kat} > ${tipe}" berhasil dibuat.`, 'success');
     }
     setSavingKat(false);
+  };
+
+  const handleStartEditKat = (item) => {
+    setEditingKatId(item.id);
+    setEditKatDraft({
+      kategori: item.kategori || '',
+      sub_kategori: item.sub_kategori || '',
+    });
+  };
+
+  const handleUpdateKat = async (id) => {
+    const kat = editKatDraft.kategori.trim();
+    const tipe = editKatDraft.sub_kategori.trim();
+    if (!kat || !tipe) {
+      showAlert('Gagal', 'Kategori dan Tipe Barang tidak boleh kosong!', 'danger');
+      return;
+    }
+
+    setSavingKat(true);
+    const { error } = await supabase
+      .from('kategori_barang')
+      .update({ kategori: kat, sub_kategori: tipe })
+      .eq('id', id);
+
+    if (error) {
+      showAlert('Gagal Edit Kategori', error.message, 'danger');
+    } else {
+      await recordAudit('EDIT', `Mengedit Kategori #${id} menjadi: ${kat} > ${tipe}`);
+      setEditingKatId(null);
+      await fetchKategori();
+    }
+    setSavingKat(false);
+  };
+
+  const handleDeleteKat = (item) => {
+    showConfirm(
+      'Hapus Kategori & Tipe?',
+      `Yakin ingin menghapus "${item.kategori} > ${item.sub_kategori}" dari daftar pilihan?`,
+      async () => {
+        const { error } = await supabase
+          .from('kategori_barang')
+          .delete()
+          .eq('id', item.id);
+
+        if (error) {
+          showAlert('Gagal Menghapus', error.message, 'danger');
+        } else {
+          await recordAudit(
+            'HAPUS',
+            `Menghapus Kategori: ${item.kategori} > ${item.sub_kategori}`
+          );
+          await fetchKategori();
+          showAlert('Terhapus', 'Kategori & Tipe Barang berhasil dihapus.', 'success');
+        }
+      }
+    );
   };
 
   // --- MANIPULASI BARIS BARANG & SN DALAM 1 SURAT JALAN ---
@@ -465,7 +521,6 @@ export default function App() {
     e.preventDefault();
     if (userRole === 'viewer') return;
 
-    // Validasi tiap baris barang
     for (let i = 0; i < itemsList.length; i++) {
       const row = itemsList[i];
       if (!row.nama.trim() || !row.qty || Number(row.qty) <= 0) {
@@ -478,7 +533,6 @@ export default function App() {
       }
     }
 
-    // Validasi stok gudang jika Barang Keluar (akumulasi per nama barang dalam 1 SJ)
     if (activeTab === 'keluar') {
       const requestedMap = new Map();
       itemsList.forEach((row) => {
@@ -768,7 +822,8 @@ export default function App() {
         (it, idx) => `
         <tr>
           <td style="text-align:center;">${idx + 1}</td>
-          <td>${it.kategori && it.kategori !== '-' ? `${it.kategori}${it.sub_kategori && it.sub_kategori !== '-' ? ` (${it.sub_kategori})` : ''}` : '-'}</td>
+          <td>${it.kategori && it.kategori !== '-' ? it.kategori : '-'}</td>
+          <td>${it.sub_kategori && it.sub_kategori !== '-' ? it.sub_kategori : '-'}</td>
           <td><strong>${it.nama}</strong></td>
           <td style="font-family: monospace;">${it.sn || '-'}</td>
           <td style="text-align:center;"><strong>${it.qty} Unit</strong></td>
@@ -838,6 +893,7 @@ export default function App() {
               <tr>
                 <th style="width: 40px;">No</th>
                 <th>Kategori</th>
+                <th>Tipe Barang</th>
                 <th>Nama Barang</th>
                 <th>Serial Number (SN)</th>
                 <th style="width: 90px;">Quantity</th>
@@ -846,7 +902,7 @@ export default function App() {
             <tbody>
               ${itemsRowsHtml}
               <tr>
-                <td colspan="4" style="text-align:right; font-weight:bold; background:#f8fafc;">TOTAL QUANTITY</td>
+                <td colspan="5" style="text-align:right; font-weight:bold; background:#f8fafc;">TOTAL QUANTITY</td>
                 <td style="text-align:center; font-weight:bold; background:#f8fafc;">${totalQtyGroup} Unit</td>
               </tr>
             </tbody>
@@ -957,7 +1013,7 @@ export default function App() {
       'PT / Perusahaan',
       'Alamat',
       'Kategori',
-      'Sub-Kategori',
+      'Tipe Barang',
       'Nama Barang',
       'Serial Number (SN)',
       'Quantity',
@@ -1531,19 +1587,22 @@ export default function App() {
 
                   <button
                     type="button"
-                    onClick={() => setShowNewKatForm(!showNewKatForm)}
+                    onClick={() => setShowManageKatPanel(!showManageKatPanel)}
                     className="px-3.5 py-2 rounded-xl bg-indigo-500/10 hover:bg-indigo-600 text-indigo-400 hover:text-white border border-indigo-500/20 text-xs font-semibold transition-all"
                   >
-                    {showNewKatForm ? '✕ Tutup Form Kategori' : '+ Buat Kategori Baru'}
+                    {showManageKatPanel
+                      ? '✕ Tutup Kelola Kategori'
+                      : '⚙️ Kelola Kategori & Tipe'}
                   </button>
                 </div>
 
-                {/* Form Mini Tambah Kategori Baru */}
-                {showNewKatForm && (
-                  <div className="p-4 rounded-xl bg-slate-950/90 border border-indigo-500/30 space-y-3">
+                {/* Panel Kelola Kategori & Tipe Barang (Tambah / Edit / Hapus) */}
+                {showManageKatPanel && (
+                  <div className="p-4 rounded-xl bg-slate-950/90 border border-indigo-500/30 space-y-4">
                     <p className="text-xs font-semibold text-indigo-400 uppercase tracking-wider">
-                      Tambah Kategori &amp; Sub-Kategori Baru
+                      Tambah / Edit / Hapus Kategori &amp; Tipe Barang
                     </p>
+
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                       <input
                         type="text"
@@ -1567,7 +1626,7 @@ export default function App() {
                         onChange={(e) =>
                           setNewKatData({ ...newKatData, sub_kategori: e.target.value })
                         }
-                        placeholder="Nama Sub-Kategori (misal: USG)"
+                        placeholder="Tipe Barang (misal: Acclarix LX8)"
                         className="bg-slate-900 border border-slate-800 rounded-xl px-4 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500"
                       />
 
@@ -1577,9 +1636,93 @@ export default function App() {
                         onClick={handleSaveNewKategori}
                         className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold shadow-lg shadow-indigo-950/50 transition-all"
                       >
-                        {savingKat ? 'Menyimpan...' : 'Simpan Kategori'}
+                        {savingKat ? 'Menyimpan...' : '+ Tambah Kategori & Tipe'}
                       </button>
                     </div>
+
+                    {/* Daftar Kategori Tersimpan (Edit & Hapus) */}
+                    {kategoriList.length > 0 && (
+                      <div className="max-h-56 overflow-y-auto rounded-xl border border-slate-800 divide-y divide-slate-800/70">
+                        {kategoriList.map((item) => (
+                          <div
+                            key={item.id}
+                            className="p-3 bg-slate-900/70 flex flex-wrap items-center justify-between gap-2 text-xs"
+                          >
+                            {editingKatId === item.id ? (
+                              <div className="flex flex-wrap items-center gap-2 flex-1">
+                                <input
+                                  type="text"
+                                  value={editKatDraft.kategori}
+                                  onChange={(e) =>
+                                    setEditKatDraft({
+                                      ...editKatDraft,
+                                      kategori: e.target.value,
+                                    })
+                                  }
+                                  placeholder="Kategori"
+                                  className="bg-slate-950 border border-indigo-500 rounded-lg px-3 py-1.5 text-slate-200 text-xs"
+                                />
+                                <input
+                                  type="text"
+                                  value={editKatDraft.sub_kategori}
+                                  onChange={(e) =>
+                                    setEditKatDraft({
+                                      ...editKatDraft,
+                                      sub_kategori: e.target.value,
+                                    })
+                                  }
+                                  placeholder="Tipe Barang"
+                                  className="bg-slate-950 border border-indigo-500 rounded-lg px-3 py-1.5 text-slate-200 text-xs"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => handleUpdateKat(item.id)}
+                                  className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-semibold"
+                                >
+                                  Simpan
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setEditingKatId(null)}
+                                  className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg"
+                                >
+                                  Batal
+                                </button>
+                              </div>
+                            ) : (
+                              <>
+                                <div className="flex items-center gap-2">
+                                  <span className="px-2.5 py-0.5 rounded bg-indigo-500/10 text-indigo-300 border border-indigo-500/20 font-semibold">
+                                    {item.kategori}
+                                  </span>
+                                  <span className="text-slate-500">›</span>
+                                  <span className="text-slate-200 font-medium">
+                                    {item.sub_kategori}
+                                  </span>
+                                </div>
+
+                                <div className="flex items-center gap-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleStartEditKat(item)}
+                                    className="px-2.5 py-1 bg-slate-800 hover:bg-indigo-600 text-slate-300 hover:text-white rounded-lg font-medium transition-all"
+                                  >
+                                    ✏️ Edit
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteKat(item)}
+                                    className="px-2.5 py-1 bg-rose-500/10 hover:bg-rose-600 text-rose-400 hover:text-white rounded-lg font-medium transition-all"
+                                  >
+                                    Hapus
+                                  </button>
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -1771,7 +1914,7 @@ export default function App() {
 
                     <div className="space-y-3">
                       {itemsList.map((row, index) => {
-                        const rowSubCats = getSubCategoriesFor(row.kategori);
+                        const rowTipeList = getTipeBarangFor(row.kategori);
 
                         return (
                           <div
@@ -1800,7 +1943,7 @@ export default function App() {
 
                             <div className="md:col-span-2">
                               <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
-                                Sub-Kategori
+                                Tipe Barang
                               </label>
                               <select
                                 value={row.sub_kategori}
@@ -1814,10 +1957,10 @@ export default function App() {
                                 }
                                 className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 disabled:opacity-50 focus:outline-none focus:border-indigo-500"
                               >
-                                <option value="">-- Sub-Kat --</option>
-                                {rowSubCats.map((sub) => (
-                                  <option key={sub} value={sub}>
-                                    {sub}
+                                <option value="">-- Tipe Barang --</option>
+                                {rowTipeList.map((tipe) => (
+                                  <option key={tipe} value={tipe}>
+                                    {tipe}
                                   </option>
                                 ))}
                               </select>
@@ -2050,7 +2193,6 @@ export default function App() {
                 <div className="space-y-8">
                   {groupedByMonthAndSJ.map((monthGroup) => (
                     <div key={monthGroup.monthName} className="space-y-4">
-                      {/* Header Bulan */}
                       <div className="px-4 py-2.5 rounded-xl bg-slate-950 border border-slate-800 font-bold text-xs uppercase tracking-wider text-emerald-400 flex items-center justify-between">
                         <span>
                           📅 Bulan: {monthGroup.monthName} ({monthGroup.sjGroups.length}{' '}
@@ -2058,7 +2200,6 @@ export default function App() {
                         </span>
                       </div>
 
-                      {/* Kartu per Surat Jalan */}
                       <div className="space-y-4">
                         {monthGroup.sjGroups.map((sjGroup) => {
                           const totalQtySJ = sjGroup.items.reduce(
@@ -2071,7 +2212,6 @@ export default function App() {
                               key={sjGroup.key}
                               className="rounded-xl border border-slate-800 bg-slate-950/60 overflow-hidden shadow-lg"
                             >
-                              {/* Header Surat Jalan (Info SJ, PT/Perusahaan, Alamat, Tanggal, Foto, Cetak PDF 1 SJ) */}
                               <div className="p-4 bg-slate-900/90 border-b border-slate-800 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
                                 <div className="space-y-1.5">
                                   <div className="flex flex-wrap items-center gap-2.5">
@@ -2136,13 +2276,13 @@ export default function App() {
                                 </div>
                               </div>
 
-                              {/* Sub-Tabel Daftar Barang & SN di dalam Surat Jalan ini */}
                               <div className="overflow-x-auto">
                                 <table className="w-full text-left text-sm text-slate-300">
                                   <thead className="bg-slate-950/70 text-slate-400 font-semibold uppercase text-[11px] border-b border-slate-800/80">
                                     <tr>
                                       <th className="py-2.5 px-4 w-28">Status</th>
-                                      <th className="py-2.5 px-4">Kategori / Sub</th>
+                                      <th className="py-2.5 px-4">Kategori</th>
+                                      <th className="py-2.5 px-4">Tipe Barang</th>
                                       <th className="py-2.5 px-4">Nama Barang</th>
                                       <th className="py-2.5 px-4">Serial Number (SN)</th>
                                       <th className="py-2.5 px-4 text-emerald-400">
@@ -2180,17 +2320,19 @@ export default function App() {
 
                                           <td className="py-2.5 px-4">
                                             {log.kategori && log.kategori !== '-' ? (
-                                              <div className="flex flex-wrap items-center gap-1.5">
-                                                <span className="px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-300 border border-indigo-500/20 text-xs font-semibold">
-                                                  {log.kategori}
-                                                </span>
-                                                {log.sub_kategori &&
-                                                  log.sub_kategori !== '-' && (
-                                                    <span className="text-xs text-slate-400">
-                                                      › {log.sub_kategori}
-                                                    </span>
-                                                  )}
-                                              </div>
+                                              <span className="px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-300 border border-indigo-500/20 text-xs font-semibold">
+                                                {log.kategori}
+                                              </span>
+                                            ) : (
+                                              <span className="text-xs text-slate-600">-</span>
+                                            )}
+                                          </td>
+
+                                          <td className="py-2.5 px-4">
+                                            {log.sub_kategori && log.sub_kategori !== '-' ? (
+                                              <span className="px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-xs text-slate-200">
+                                                {log.sub_kategori}
+                                              </span>
                                             ) : (
                                               <span className="text-xs text-slate-600">-</span>
                                             )}
@@ -2343,7 +2485,7 @@ export default function App() {
 
               <div>
                 <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">
-                  Sub-Kategori
+                  Tipe Barang
                 </label>
                 <select
                   value={editModal.sub_kategori}
@@ -2353,10 +2495,10 @@ export default function App() {
                   }
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 disabled:opacity-50 focus:outline-none focus:border-indigo-500 text-sm"
                 >
-                  <option value="">-- Pilih Sub-Kategori --</option>
-                  {getSubCategoriesFor(editModal.kategori).map((sub) => (
-                    <option key={sub} value={sub}>
-                      {sub}
+                  <option value="">-- Pilih Tipe Barang --</option>
+                  {getTipeBarangFor(editModal.kategori).map((tipe) => (
+                    <option key={tipe} value={tipe}>
+                      {tipe}
                     </option>
                   ))}
                 </select>
