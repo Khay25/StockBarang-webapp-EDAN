@@ -378,7 +378,7 @@ export default function App() {
       .filter(Boolean);
   };
 
-  // --- DATA BARANG & SN UNTUK AUTOCOMPLETE / DROPDOWN TAB BARANG KELUAR ---
+  // --- DATA BARANG & SN UNTUK DROPDOWN TAB BARANG KELUAR ---
   const availableStockSummary = useMemo(() => {
     const itemMap = new Map();
     const snBalanceMap = new Map();
@@ -434,67 +434,6 @@ export default function App() {
 
     return { availableItems, availableSNs, snBalanceMap, itemMap };
   }, [allLogs]);
-
-  // Daftar Surat Jalan Barang Masuk untuk Autocomplete & Auto-Fill di Tab Keluar
-  const incomingSJMap = useMemo(() => {
-    const map = new Map();
-    allLogs
-      .filter((log) => log.tipe === 'Barang Masuk' && log.asal && log.asal !== '-')
-      .forEach((log) => {
-        const sjKey = log.asal.trim().toLowerCase();
-        if (!map.has(sjKey)) {
-          map.set(sjKey, {
-            sj: log.asal.trim(),
-            perusahaan: log.perusahaan && log.perusahaan !== '-' ? log.perusahaan : '',
-            alamat: log.alamat && log.alamat !== '-' ? log.alamat : '',
-            items: [],
-          });
-        }
-        const entry = map.get(sjKey);
-        if (!entry.perusahaan && log.perusahaan && log.perusahaan !== '-') {
-          entry.perusahaan = log.perusahaan;
-        }
-        if (!entry.alamat && log.alamat && log.alamat !== '-') {
-          entry.alamat = log.alamat;
-        }
-        entry.items.push(log);
-      });
-    return map;
-  }, [allLogs]);
-
-  // Handler saat No. Surat Jalan diketik / dipilih di Tab Barang Keluar
-  const handleSJNumberChange = (val) => {
-    setSjHeader((prev) => ({ ...prev, asal: val }));
-
-    if (activeTab !== 'keluar') return;
-
-    const matchedSJ = incomingSJMap.get(val.trim().toLowerCase());
-    if (matchedSJ) {
-      const autoRows = matchedSJ.items.map((srcItem) => ({
-        id: Date.now() + Math.random(),
-        kategori:
-          srcItem.kategori && srcItem.kategori !== '-' ? srcItem.kategori : '',
-        sub_kategori:
-          srcItem.sub_kategori && srcItem.sub_kategori !== '-'
-            ? srcItem.sub_kategori
-            : '',
-        nama: (srcItem.nama || '').trim(),
-        sn: srcItem.sn && srcItem.sn !== '-' ? srcItem.sn.trim() : '',
-        qty: String(srcItem.qty || 1),
-      }));
-
-      setSjHeader((prev) => ({
-        ...prev,
-        asal: val,
-        perusahaan: matchedSJ.perusahaan || prev.perusahaan,
-        alamat: matchedSJ.alamat || prev.alamat,
-      }));
-
-      if (autoRows.length > 0) {
-        setItemsList(autoRows);
-      }
-    }
-  };
 
   const handleSaveNewKategori = async () => {
     const kat = newKatData.kategori.trim();
@@ -1979,9 +1918,7 @@ export default function App() {
                         1. Informasi Surat Jalan &amp; Tujuan / Asal
                       </span>
                       <span className="text-[11px] text-slate-500">
-                        {activeTab === 'keluar'
-                          ? '💡 Ketik/pilih No. SJ Barang Masuk untuk isi otomatis daftar barang & SN'
-                          : '1 Surat Jalan berlaku untuk seluruh barang di bawah'}
+                        1 Surat Jalan berlaku untuk seluruh barang di bawah
                       </span>
                     </div>
 
@@ -1993,26 +1930,13 @@ export default function App() {
                         <input
                           type="text"
                           required
-                          list={activeTab === 'keluar' ? 'incoming-sj-list' : undefined}
                           value={sjHeader.asal}
-                          onChange={(e) => handleSJNumberChange(e.target.value)}
-                          className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-slate-200 focus:outline-none focus:border-indigo-500 transition-all text-sm"
-                          placeholder={
-                            activeTab === 'keluar'
-                              ? 'Ketik/pilih No. SJ (auto-isi jika ada di Masuk)'
-                              : 'Contoh: 736.SJKB.2026.29.10-1'
+                          onChange={(e) =>
+                            setSjHeader({ ...sjHeader, asal: e.target.value })
                           }
+                          className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-slate-200 focus:outline-none focus:border-indigo-500 transition-all text-sm"
+                          placeholder="Contoh: 736.SJKB.2026.29.10-1"
                         />
-                        {activeTab === 'keluar' && (
-                          <datalist id="incoming-sj-list">
-                            {Array.from(incomingSJMap.values()).map((sjObj) => (
-                              <option
-                                key={sjObj.sj}
-                                value={sjObj.sj}
-                              >{`${sjObj.sj}${sjObj.perusahaan ? ` - ${sjObj.perusahaan}` : ''}`}</option>
-                            ))}
-                          </datalist>
-                        )}
                       </div>
 
                       <div>
