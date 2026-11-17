@@ -43,7 +43,6 @@ export default function App() {
     tanggal: new Date().toISOString().split('T')[0],
     ket: '',
     foto_url: '',
-    status_masuk: 'Stock',
     status_keluar: 'Penjualan',
     pinjam_mulai: new Date().toISOString().split('T')[0],
     pinjam_selesai: '',
@@ -140,6 +139,15 @@ export default function App() {
     const ket = log.ket || '';
     const isMasuk = log.tipe === 'Barang Masuk';
 
+    if (isMasuk) {
+      return {
+        code: 'masuk',
+        label: 'Masuk',
+        period: '',
+        badgeClass: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
+      };
+    }
+
     if (ket.includes('[DIPINJAM') || ket.includes('[PINJAM (DEMO)')) {
       const dateMatch = ket.match(/\(([^)]+)\)/);
       return {
@@ -165,15 +173,6 @@ export default function App() {
         label: '✅ Dikembalikan',
         period: '',
         badgeClass: 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20',
-      };
-    }
-
-    if (isMasuk) {
-      return {
-        code: 'stock',
-        label: '🟢 Stock',
-        period: '',
-        badgeClass: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
       };
     }
 
@@ -291,7 +290,6 @@ export default function App() {
         tanggal: today,
         ket: '',
         foto_url: '',
-        status_masuk: 'Stock',
         status_keluar: 'Penjualan',
         pinjam_mulai: today,
         pinjam_selesai: '',
@@ -429,7 +427,6 @@ export default function App() {
       }
     });
 
-    // Tampilkan semua item & SN tanpa filter habis / tanpa notif sisa stok
     const availableItems = Array.from(itemMap.values());
     const availableSNs = Array.from(snBalanceMap.values());
 
@@ -770,10 +767,11 @@ export default function App() {
       }
     }
 
-    const activeStatus =
-      activeTab === 'masuk' ? sjHeader.status_masuk : sjHeader.status_keluar;
-
-    if (activeStatus === 'Pinjam (Demo)' && !sjHeader.pinjam_mulai) {
+    if (
+      activeTab === 'keluar' &&
+      sjHeader.status_keluar === 'Pinjam (Demo)' &&
+      !sjHeader.pinjam_mulai
+    ) {
       showAlert(
         'Tanggal Pinjam Belum Diisi',
         'Silakan isi tanggal Mulai Pinjam (Demo)!',
@@ -783,19 +781,20 @@ export default function App() {
     }
 
     let finalKet = sjHeader.ket.trim();
-    const periodePinjam =
-      sjHeader.pinjam_mulai || sjHeader.pinjam_selesai
-        ? ` (${sjHeader.pinjam_mulai || '?'} s/d ${sjHeader.pinjam_selesai || '?'})`
-        : '';
 
-    if (activeStatus === 'Pinjam (Demo)') {
-      finalKet = `[DIPINJAM] [PINJAM (DEMO)${periodePinjam}] ${finalKet}`.trim();
-    } else if (activeStatus === 'Service') {
-      finalKet = `[SERVICE] ${finalKet}`.trim();
-    } else if (activeTab === 'masuk' && activeStatus === 'Stock') {
-      finalKet = `[STOCK] ${finalKet}`.trim();
-    } else if (activeTab === 'keluar' && activeStatus === 'Penjualan') {
-      finalKet = `[PENJUALAN] ${finalKet}`.trim();
+    if (activeTab === 'keluar') {
+      const periodePinjam =
+        sjHeader.pinjam_mulai || sjHeader.pinjam_selesai
+          ? ` (${sjHeader.pinjam_mulai || '?'} s/d ${sjHeader.pinjam_selesai || '?'})`
+          : '';
+
+      if (sjHeader.status_keluar === 'Pinjam (Demo)') {
+        finalKet = `[DIPINJAM] [PINJAM (DEMO)${periodePinjam}] ${finalKet}`.trim();
+      } else if (sjHeader.status_keluar === 'Service') {
+        finalKet = `[SERVICE] ${finalKet}`.trim();
+      } else {
+        finalKet = `[PENJUALAN] ${finalKet}`.trim();
+      }
     }
 
     const tipeTransaksi = activeTab === 'masuk' ? 'Barang Masuk' : 'Barang Keluar';
@@ -827,9 +826,9 @@ export default function App() {
 
       await recordAudit(
         'TAMBAH',
-        `Menambah ${tipeTransaksi} [${activeStatus}] [SJ: ${sjValue} | PT: ${
-          sjHeader.perusahaan || '-'
-        }]: ${ringkasanBarang}`
+        `Menambah ${tipeTransaksi}${
+          activeTab === 'keluar' ? ` [${sjHeader.status_keluar}]` : ''
+        } [SJ: ${sjValue} | PT: ${sjHeader.perusahaan || '-'}]: ${ringkasanBarang}`
       );
 
       const today = new Date().toISOString().split('T')[0];
@@ -840,7 +839,6 @@ export default function App() {
         tanggal: today,
         ket: '',
         foto_url: '',
-        status_masuk: 'Stock',
         status_keluar: 'Penjualan',
         pinjam_mulai: today,
         pinjam_selesai: '',
@@ -965,7 +963,7 @@ export default function App() {
       nama: log.nama,
       qty: parseInt(log.qty, 10) || 0,
       tanggal: tglKembali,
-      ket: `[STOCK] Pengembalian barang dipinjam tgl ${log.tanggal}`,
+      ket: `Pengembalian barang dipinjam tgl ${log.tanggal}`,
       foto_url: log.foto_url || '',
     };
 
@@ -1029,19 +1027,19 @@ export default function App() {
     const statusInfo = parseStatusFromKet(firstItem);
     const badgeText =
       firstItem.tipe === 'Barang Masuk'
-        ? `BUKTI BARANG MASUK (${statusInfo.code.toUpperCase()})`
+        ? 'BUKTI BARANG MASUK'
         : statusInfo.code === 'pinjam'
         ? 'SURAT PINJAM (DEMO) BARANG'
         : statusInfo.code === 'service'
         ? 'SURAT JALAN SERVICE BARANG'
         : 'BUKTI PENJUALAN / BARANG KELUAR';
     const badgeColor =
-      statusInfo.code === 'pinjam'
+      firstItem.tipe === 'Barang Masuk'
+        ? '#059669'
+        : statusInfo.code === 'pinjam'
         ? '#d97706'
         : statusInfo.code === 'service'
         ? '#7c3aed'
-        : firstItem.tipe === 'Barang Masuk'
-        ? '#059669'
         : '#e11d48';
 
     const itemsRowsHtml = sjGroup.items
@@ -1199,14 +1197,14 @@ export default function App() {
       }
 
       let matchPinjam = true;
-      if (onlyPinjam) {
+      if (activeTab === 'keluar' && onlyPinjam) {
         matchPinjam =
           log.ket?.includes('[DIPINJAM]') || log.ket?.includes('[PINJAM (DEMO)');
       }
 
       return matchSearch && matchMonth && matchKategori && matchDateRange && matchPinjam;
     });
-  }, [logs, search, selectedMonth, selectedKategoriFilter, startDate, endDate, onlyPinjam]);
+  }, [logs, search, selectedMonth, selectedKategoriFilter, startDate, endDate, activeTab, onlyPinjam]);
 
   const filteredAuditLogs = useMemo(() => {
     return auditLogs.filter((a) => {
@@ -1448,9 +1446,6 @@ export default function App() {
   if (!session) {
     return <Login onLoginSuccess={(newSession) => setSession(newSession)} />;
   }
-
-  const currentActiveStatus =
-    activeTab === 'masuk' ? sjHeader.status_masuk : sjHeader.status_keluar;
 
   return (
     <div className="min-h-screen bg-[#0b0f19] text-slate-100 p-4 md:p-8 font-sans">
@@ -2047,33 +2042,12 @@ export default function App() {
                         />
                       </div>
 
-                      {/* STATUS TRANSAKSI (MASUK MAUPUN KELUAR) */}
-                      <div>
-                        <label
-                          className={`block text-xs font-semibold uppercase tracking-wider mb-1.5 ${
-                            activeTab === 'masuk' ? 'text-emerald-400' : 'text-amber-400'
-                          }`}
-                        >
-                          {activeTab === 'masuk'
-                            ? 'Status Transaksi Masuk'
-                            : 'Status Transaksi Keluar'}
-                        </label>
-                        {activeTab === 'masuk' ? (
-                          <select
-                            value={sjHeader.status_masuk}
-                            onChange={(e) =>
-                              setSjHeader({
-                                ...sjHeader,
-                                status_masuk: e.target.value,
-                              })
-                            }
-                            className="w-full bg-slate-900 border border-emerald-500/40 rounded-xl px-4 py-2.5 text-emerald-300 focus:outline-none focus:border-emerald-500 transition-all text-sm font-semibold"
-                          >
-                            <option value="Stock">🟢 Stock</option>
-                            <option value="Pinjam (Demo)">🟡 Pinjam (Demo)</option>
-                            <option value="Service">🔧 Service</option>
-                          </select>
-                        ) : (
+                      {/* STATUS TRANSAKSI KELUAR (HANYA DI TAB BARANG KELUAR) */}
+                      {activeTab === 'keluar' ? (
+                        <div>
+                          <label className="block text-xs font-semibold text-amber-400 uppercase tracking-wider mb-1.5">
+                            Status Transaksi Keluar
+                          </label>
                           <select
                             value={sjHeader.status_keluar}
                             onChange={(e) =>
@@ -2088,62 +2062,77 @@ export default function App() {
                             <option value="Pinjam (Demo)">🟡 Pinjam (Demo)</option>
                             <option value="Service">🔧 Service</option>
                           </select>
-                        )}
-                      </div>
-
-                      {/* BOX TANGGAL MULAI & SELESAI PINJAM (DEMO) */}
-                      {currentActiveStatus === 'Pinjam (Demo)' && (
-                        <div className="md:col-span-3 p-3.5 rounded-xl bg-amber-500/5 border border-amber-500/30 grid grid-cols-1 md:grid-cols-2 gap-4">
-                          <div>
-                            <label className="block text-xs font-semibold text-amber-400 uppercase tracking-wider mb-1.5">
-                              Mulai Pinjam (Demo) *
-                            </label>
-                            <input
-                              type="date"
-                              required
-                              value={sjHeader.pinjam_mulai}
-                              onChange={(e) =>
-                                setSjHeader({
-                                  ...sjHeader,
-                                  pinjam_mulai: e.target.value,
-                                })
-                              }
-                              className="w-full bg-slate-900 border border-amber-500/40 rounded-xl px-4 py-2 text-slate-200 focus:outline-none focus:border-amber-400 text-sm"
-                            />
-                          </div>
-
-                          <div>
-                            <label className="block text-xs font-semibold text-amber-400 uppercase tracking-wider mb-1.5">
-                              Selesai Pinjam (Demo)
-                            </label>
-                            <input
-                              type="date"
-                              value={sjHeader.pinjam_selesai}
-                              onChange={(e) =>
-                                setSjHeader({
-                                  ...sjHeader,
-                                  pinjam_selesai: e.target.value,
-                                })
-                              }
-                              className="w-full bg-slate-900 border border-amber-500/40 rounded-xl px-4 py-2 text-slate-200 focus:outline-none focus:border-amber-400 text-sm"
-                            />
-                          </div>
+                        </div>
+                      ) : (
+                        <div>
+                          <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
+                            Foto Surat Jalan / Barang
+                          </label>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={(e) => handleFileUpload(e, false)}
+                            className="w-full text-sm text-slate-400 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-slate-800 file:text-slate-200 hover:file:bg-slate-700 cursor-pointer"
+                          />
                         </div>
                       )}
 
-                      <div>
-                        <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
-                          Foto Surat Jalan / Barang
-                        </label>
-                        <input
-                          type="file"
-                          accept="image/*"
-                          onChange={(e) => handleFileUpload(e, false)}
-                          className="w-full text-sm text-slate-400 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-slate-800 file:text-slate-200 hover:file:bg-slate-700 cursor-pointer"
-                        />
-                      </div>
+                      {/* BOX TANGGAL MULAI & SELESAI PINJAM (DEMO) - KHUSUS TAB BARANG KELUAR */}
+                      {activeTab === 'keluar' &&
+                        sjHeader.status_keluar === 'Pinjam (Demo)' && (
+                          <div className="md:col-span-3 p-3.5 rounded-xl bg-amber-500/5 border border-amber-500/30 grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                              <label className="block text-xs font-semibold text-amber-400 uppercase tracking-wider mb-1.5">
+                                Mulai Pinjam (Demo) *
+                              </label>
+                              <input
+                                type="date"
+                                required
+                                value={sjHeader.pinjam_mulai}
+                                onChange={(e) =>
+                                  setSjHeader({
+                                    ...sjHeader,
+                                    pinjam_mulai: e.target.value,
+                                  })
+                                }
+                                className="w-full bg-slate-900 border border-amber-500/40 rounded-xl px-4 py-2 text-slate-200 focus:outline-none focus:border-amber-400 text-sm"
+                              />
+                            </div>
 
-                      <div className="md:col-span-2">
+                            <div>
+                              <label className="block text-xs font-semibold text-amber-400 uppercase tracking-wider mb-1.5">
+                                Selesai Pinjam (Demo)
+                              </label>
+                              <input
+                                type="date"
+                                value={sjHeader.pinjam_selesai}
+                                onChange={(e) =>
+                                  setSjHeader({
+                                    ...sjHeader,
+                                    pinjam_selesai: e.target.value,
+                                  })
+                                }
+                                className="w-full bg-slate-900 border border-amber-500/40 rounded-xl px-4 py-2 text-slate-200 focus:outline-none focus:border-amber-400 text-sm"
+                              />
+                            </div>
+                          </div>
+                        )}
+
+                      {activeTab === 'keluar' && (
+                        <div>
+                          <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
+                            Foto Surat Jalan / Barang
+                          </label>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={(e) => handleFileUpload(e, false)}
+                            className="w-full text-sm text-slate-400 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-slate-800 file:text-slate-200 hover:file:bg-slate-700 cursor-pointer"
+                          />
+                        </div>
+                      )}
+
+                      <div className={activeTab === 'keluar' ? 'md:col-span-2' : 'md:col-span-3'}>
                         <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
                           Keterangan Surat Jalan
                         </label>
@@ -2155,9 +2144,11 @@ export default function App() {
                           }
                           className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-slate-200 focus:outline-none focus:border-indigo-500 transition-all text-sm"
                           placeholder={
-                            currentActiveStatus === 'Pinjam (Demo)'
+                            activeTab === 'keluar' &&
+                            sjHeader.status_keluar === 'Pinjam (Demo)'
                               ? 'Nama peminjam / RS / tujuan demo, dll'
-                              : currentActiveStatus === 'Service'
+                              : activeTab === 'keluar' &&
+                                sjHeader.status_keluar === 'Service'
                               ? 'Keluhan unit / teknisi / keterangan service'
                               : 'Catatan atau keterangan tambahan untuk Surat Jalan ini'
                           }
@@ -2413,16 +2404,17 @@ export default function App() {
                   <button
                     type="submit"
                     className={`w-full py-3.5 px-6 rounded-xl font-semibold text-white shadow-lg transition-all ${
-                      currentActiveStatus === 'Pinjam (Demo)'
-                        ? 'bg-amber-600 hover:bg-amber-500 shadow-amber-950/50'
-                        : currentActiveStatus === 'Service'
-                        ? 'bg-violet-600 hover:bg-violet-500 shadow-violet-950/50'
-                        : activeTab === 'masuk'
+                      activeTab === 'masuk'
                         ? 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-950/50'
+                        : sjHeader.status_keluar === 'Pinjam (Demo)'
+                        ? 'bg-amber-600 hover:bg-amber-500 shadow-amber-950/50'
+                        : sjHeader.status_keluar === 'Service'
+                        ? 'bg-violet-600 hover:bg-violet-500 shadow-violet-950/50'
                         : 'bg-rose-600 hover:bg-rose-500 shadow-rose-950/50'
                     }`}
                   >
-                    Simpan Surat Jalan ({itemsList.length} Barang) — {currentActiveStatus}
+                    Simpan Surat Jalan ({itemsList.length} Barang) —{' '}
+                    {activeTab === 'masuk' ? 'Barang Masuk' : sjHeader.status_keluar}
                   </button>
                 </form>
               </div>
@@ -2439,19 +2431,21 @@ export default function App() {
                 </h2>
 
                 <div className="flex flex-wrap items-center gap-3">
-                  <button
-                    onClick={() => setOnlyPinjam(!onlyPinjam)}
-                    className={`px-3 py-2 rounded-xl text-xs font-semibold border transition-all flex items-center gap-1.5 ${
-                      onlyPinjam
-                        ? 'bg-amber-500 text-slate-950 border-amber-400 font-bold shadow-lg shadow-amber-950/50'
-                        : 'bg-slate-950 text-amber-400 border-amber-500/30 hover:border-amber-500'
-                    }`}
-                  >
-                    <span>🟡</span>
-                    <span>
-                      {onlyPinjam ? 'Tampilkan Semua' : 'Hanya Pinjam (Demo)'}
-                    </span>
-                  </button>
+                  {activeTab === 'keluar' && (
+                    <button
+                      onClick={() => setOnlyPinjam(!onlyPinjam)}
+                      className={`px-3 py-2 rounded-xl text-xs font-semibold border transition-all flex items-center gap-1.5 ${
+                        onlyPinjam
+                          ? 'bg-amber-500 text-slate-950 border-amber-400 font-bold shadow-lg shadow-amber-950/50'
+                          : 'bg-slate-950 text-amber-400 border-amber-500/30 hover:border-amber-500'
+                      }`}
+                    >
+                      <span>🟡</span>
+                      <span>
+                        {onlyPinjam ? 'Tampilkan Semua' : 'Hanya Pinjam (Demo)'}
+                      </span>
+                    </button>
+                  )}
 
                   <button
                     onClick={handleExportExcel}
