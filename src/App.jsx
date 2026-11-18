@@ -39,6 +39,7 @@ export default function App() {
   const [sjHeader, setSjHeader] = useState({
     asal: '',
     perusahaan: '',
+    pengiriman: '',
     alamat: '',
     tanggal: new Date().toISOString().split('T')[0],
     ket: '',
@@ -81,6 +82,7 @@ export default function App() {
     tipe: '',
     asal: '',
     perusahaan: '',
+    pengiriman: '',
     alamat: '',
     kategori: '',
     sub_kategori: '', // dipakai untuk Tipe Barang
@@ -134,6 +136,14 @@ export default function App() {
     { value: '10', label: 'November' },
     { value: '11', label: 'Desember' },
   ];
+
+  // Helper parse Pengiriman & Keterangan dari kolom ket
+  const extractPengirimanAndCleanKet = (rawKet = '') => {
+    const match = rawKet.match(/\[PENGIRIMAN:\s*([^\]]+)\]/i);
+    const pengiriman = match ? match[1].trim() : '';
+    const cleanKet = rawKet.replace(/\[PENGIRIMAN:\s*[^\]]+\]\s*/gi, '').trim();
+    return { pengiriman, cleanKet };
+  };
 
   // Helper parse status dari kolom ket
   const parseStatusFromKet = (log) => {
@@ -287,6 +297,7 @@ export default function App() {
       setSjHeader({
         asal: '',
         perusahaan: '',
+        pengiriman: '',
         alamat: '',
         tanggal: today,
         ket: '',
@@ -724,15 +735,17 @@ export default function App() {
       return;
     }
 
+    const pengirimanTrim = sjHeader.pengiriman.trim();
+    const pengirimanTag = pengirimanTrim ? `[PENGIRIMAN: ${pengirimanTrim}] ` : '';
     let finalKet = sjHeader.ket.trim();
 
     if (activeTab === 'masuk') {
       if (activeStatus === 'Pinjam (Demo)') {
-        finalKet = `[PINJAM (DEMO)] ${finalKet}`.trim();
+        finalKet = `[PINJAM (DEMO)] ${pengirimanTag}${finalKet}`.trim();
       } else if (activeStatus === 'Service') {
-        finalKet = `[SERVICE] ${finalKet}`.trim();
+        finalKet = `[SERVICE] ${pengirimanTag}${finalKet}`.trim();
       } else {
-        finalKet = `[STOCK] ${finalKet}`.trim();
+        finalKet = `[STOCK] ${pengirimanTag}${finalKet}`.trim();
       }
     } else {
       const periodePinjam =
@@ -741,11 +754,11 @@ export default function App() {
           : '';
 
       if (activeStatus === 'Pinjam (Demo)') {
-        finalKet = `[DIPINJAM] [PINJAM (DEMO)${periodePinjam}] ${finalKet}`.trim();
+        finalKet = `[DIPINJAM] [PINJAM (DEMO)${periodePinjam}] ${pengirimanTag}${finalKet}`.trim();
       } else if (activeStatus === 'Service') {
-        finalKet = `[SERVICE] ${finalKet}`.trim();
+        finalKet = `[SERVICE] ${pengirimanTag}${finalKet}`.trim();
       } else {
-        finalKet = `[PENJUALAN] ${finalKet}`.trim();
+        finalKet = `[PENJUALAN] ${pengirimanTag}${finalKet}`.trim();
       }
     }
 
@@ -780,13 +793,14 @@ export default function App() {
         'TAMBAH',
         `Menambah ${tipeTransaksi} [${activeStatus}] [SJ: ${sjValue} | PT: ${
           sjHeader.perusahaan || '-'
-        }]: ${ringkasanBarang}`
+        }${pengirimanTrim ? ` | Pengiriman: ${pengirimanTrim}` : ''}]: ${ringkasanBarang}`
       );
 
       const today = new Date().toISOString().split('T')[0];
       setSjHeader({
         asal: '',
         perusahaan: '',
+        pengiriman: '',
         alamat: '',
         tanggal: today,
         ket: '',
@@ -818,12 +832,14 @@ export default function App() {
   };
 
   const openEditModal = (log) => {
+    const { pengiriman, cleanKet } = extractPengirimanAndCleanKet(log.ket || '');
     setEditModal({
       isOpen: true,
       id: log.id,
       tipe: log.tipe,
       asal: log.asal || '',
       perusahaan: log.perusahaan && log.perusahaan !== '-' ? log.perusahaan : '',
+      pengiriman,
       alamat: log.alamat && log.alamat !== '-' ? log.alamat : '',
       kategori: log.kategori && log.kategori !== '-' ? log.kategori : '',
       sub_kategori: log.sub_kategori && log.sub_kategori !== '-' ? log.sub_kategori : '',
@@ -831,7 +847,7 @@ export default function App() {
       nama: log.nama || '',
       qty: log.qty || 0,
       tanggal: log.tanggal || new Date().toISOString().split('T')[0],
-      ket: log.ket || '',
+      ket: cleanKet,
       foto_url: log.foto_url || '',
     });
   };
@@ -841,6 +857,12 @@ export default function App() {
       showAlert('Gagal', 'Nama barang dan quantity wajib diisi!', 'danger');
       return;
     }
+
+    const pengirimanTrim = editModal.pengiriman.trim();
+    const cleanBaseKet = editModal.ket.replace(/\[PENGIRIMAN:\s*[^\]]+\]\s*/gi, '').trim();
+    const combinedKet = pengirimanTrim
+      ? `[PENGIRIMAN: ${pengirimanTrim}] ${cleanBaseKet}`.trim()
+      : cleanBaseKet;
 
     const updatedData = {
       asal: editModal.asal,
@@ -852,7 +874,7 @@ export default function App() {
       nama: editModal.nama,
       qty: parseInt(editModal.qty, 10) || 0,
       tanggal: editModal.tanggal,
-      ket: editModal.ket,
+      ket: combinedKet,
       foto_url: editModal.foto_url,
     };
 
@@ -978,6 +1000,8 @@ export default function App() {
     const printWindow = window.open('', '_blank');
     const firstItem = sjGroup.items[0];
     const statusInfo = parseStatusFromKet(firstItem);
+    const { pengiriman, cleanKet } = extractPengirimanAndCleanKet(sjGroup.ket || '');
+
     const badgeText =
       firstItem.tipe === 'Barang Masuk'
         ? `BUKTI BARANG MASUK (${statusInfo.code.toUpperCase()})`
@@ -1026,7 +1050,7 @@ export default function App() {
             .badge { background-color: ${badgeColor}; color: white; padding: 6px 14px; border-radius: 6px; font-weight: bold; font-size: 13px; letter-spacing: 1px; }
             .meta-table { width: 100%; border-collapse: collapse; margin-bottom: 24px; }
             .meta-table td { padding: 8px 12px; border: 1px solid #cbd5e1; font-size: 13px; }
-            .meta-label { font-weight: bold; background-color: #f8fafc; width: 25%; color: #475569; }
+            .meta-label { font-weight: bold; background-color: #f8fafc; width: 22%; color: #475569; }
             .items-table { width: 100%; border-collapse: collapse; margin-bottom: 30px; }
             .items-table th { background-color: #0f172a; color: white; padding: 10px; font-size: 12px; text-transform: uppercase; border: 1px solid #0f172a; }
             .items-table td { padding: 10px; border: 1px solid #cbd5e1; font-size: 13px; }
@@ -1054,7 +1078,9 @@ export default function App() {
             </tr>
             <tr>
               <td class="meta-label">PT / Perusahaan</td>
-              <td colspan="3"><strong>${sjGroup.perusahaan || '-'}</strong></td>
+              <td><strong>${sjGroup.perusahaan || '-'}</strong></td>
+              <td class="meta-label">Pengiriman</td>
+              <td><strong>${pengiriman || '-'}</strong></td>
             </tr>
             <tr>
               <td class="meta-label">Alamat</td>
@@ -1062,7 +1088,7 @@ export default function App() {
             </tr>
             <tr>
               <td class="meta-label">Keterangan</td>
-              <td colspan="3">${sjGroup.ket || '-'}</td>
+              <td colspan="3">${cleanKet || '-'}</td>
             </tr>
           </table>
 
@@ -1191,6 +1217,7 @@ export default function App() {
       'Tipe Transaksi',
       'No. Surat Jalan',
       'PT / Perusahaan',
+      'Pengiriman',
       'Alamat',
       'Kategori',
       'Tipe Barang',
@@ -1208,11 +1235,13 @@ export default function App() {
             minute: '2-digit',
           }) + ' WIB'
         : '-';
+      const { pengiriman, cleanKet } = extractPengirimanAndCleanKet(log.ket || '');
       return [
         index + 1,
         `"${log.tipe}"`,
         `"${(log.asal || '-').replace(/"/g, '""')}"`,
         `"${(log.perusahaan || '-').replace(/"/g, '""')}"`,
+        `"${(pengiriman || '-').replace(/"/g, '""')}"`,
         `"${(log.alamat || '-').replace(/"/g, '""')}"`,
         `"${(log.kategori || '-').replace(/"/g, '""')}"`,
         `"${(log.sub_kategori || '-').replace(/"/g, '""')}"`,
@@ -1221,7 +1250,7 @@ export default function App() {
         log.qty || 0,
         `"${log.tanggal || '-'}"`,
         `"${jamInput}"`,
-        `"${(log.ket || '-').replace(/"/g, '""')}"`,
+        `"${(cleanKet || '-').replace(/"/g, '""')}"`,
       ];
     });
 
@@ -1308,10 +1337,12 @@ export default function App() {
       const sjKey = `${sjNumber.toLowerCase()}__${log.tanggal}`;
 
       if (!monthsMap[monthYear].sjMap.has(sjKey)) {
+        const { pengiriman } = extractPengirimanAndCleanKet(log.ket || '');
         monthsMap[monthYear].sjMap.set(sjKey, {
           key: sjKey,
           sj: sjNumber,
           perusahaan: log.perusahaan || '-',
+          pengiriman,
           alamat: log.alamat || '-',
           tanggal: log.tanggal,
           created_at: log.created_at,
@@ -1325,6 +1356,10 @@ export default function App() {
       group.items.push(log);
       if ((!group.perusahaan || group.perusahaan === '-') && log.perusahaan && log.perusahaan !== '-') {
         group.perusahaan = log.perusahaan;
+      }
+      if (!group.pengiriman) {
+        const { pengiriman } = extractPengirimanAndCleanKet(log.ket || '');
+        if (pengiriman) group.pengiriman = pengiriman;
       }
       if ((!group.alamat || group.alamat === '-') && log.alamat && log.alamat !== '-') {
         group.alamat = log.alamat;
@@ -1968,7 +2003,22 @@ export default function App() {
                         />
                       </div>
 
-                      <div className="md:col-span-2">
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
+                          Pengiriman
+                        </label>
+                        <input
+                          type="text"
+                          value={sjHeader.pengiriman}
+                          onChange={(e) =>
+                            setSjHeader({ ...sjHeader, pengiriman: e.target.value })
+                          }
+                          className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-slate-200 focus:outline-none focus:border-indigo-500 transition-all text-sm"
+                          placeholder="Contoh: JNE / J&T / Kurir Internal / Driver"
+                        />
+                      </div>
+
+                      <div>
                         <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
                           Alamat Perusahaan / Pengiriman
                         </label>
@@ -2462,10 +2512,10 @@ export default function App() {
 
                   <input
                     type="text"
-                    placeholder="Cari SJ / PT / Barang / SN..."
+                    placeholder="Cari SJ / PT / Pengiriman / Barang / SN..."
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
-                    className="bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500 w-full sm:w-56"
+                    className="bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500 w-full sm:w-64"
                   />
                 </div>
               </div>
@@ -2551,6 +2601,9 @@ export default function App() {
                               (acc, item) => acc + (Number(item.qty) || 0),
                               0
                             );
+                            const { cleanKet } = extractPengirimanAndCleanKet(
+                              sjGroup.ket || ''
+                            );
 
                             return (
                               <div
@@ -2570,6 +2623,12 @@ export default function App() {
                                         </span>
                                       )}
 
+                                      {sjGroup.pengiriman && (
+                                        <span className="px-3 py-1 rounded-lg bg-amber-500/10 text-amber-300 border border-amber-500/20 text-xs font-bold">
+                                          🚚 {sjGroup.pengiriman}
+                                        </span>
+                                      )}
+
                                       <span className="text-xs text-slate-400 font-medium">
                                         🗓️ {sjGroup.tanggal}
                                       </span>
@@ -2586,9 +2645,9 @@ export default function App() {
                                       </p>
                                     )}
 
-                                    {sjGroup.ket && sjGroup.ket !== '-' && (
+                                    {cleanKet && cleanKet !== '-' && (
                                       <p className="text-xs text-slate-400">
-                                        📝 <span className="text-slate-300">{sjGroup.ket}</span>
+                                        📝 <span className="text-slate-300">{cleanKet}</span>
                                       </p>
                                     )}
                                   </div>
@@ -2793,7 +2852,22 @@ export default function App() {
                 />
               </div>
 
-              <div className="md:col-span-2">
+              <div>
+                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">
+                  Pengiriman
+                </label>
+                <input
+                  type="text"
+                  value={editModal.pengiriman}
+                  onChange={(e) =>
+                    setEditModal({ ...editModal, pengiriman: e.target.value })
+                  }
+                  placeholder="JNE / Kurir / Driver"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 focus:outline-none focus:border-indigo-500 text-sm"
+                />
+              </div>
+
+              <div>
                 <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">
                   Alamat
                 </label>
