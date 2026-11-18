@@ -2501,208 +2501,243 @@ export default function App() {
                   Belum ada riwayat data
                 </div>
               ) : (
-                <div className="space-y-8">
-                  {groupedByMonthAndSJ.map((monthGroup) => (
-                    <div key={monthGroup.monthName} className="space-y-4">
-                      <div className="px-4 py-2.5 rounded-xl bg-slate-950 border border-slate-800 font-bold text-xs uppercase tracking-wider text-emerald-400 flex items-center justify-between">
-                        <span>
-                          📅 Bulan: {monthGroup.monthName} ({monthGroup.sjGroups.length}{' '}
-                          Surat Jalan • {monthGroup.totalItemsCount} Item)
-                        </span>
-                      </div>
+                <div className="space-y-12 pt-2">
+                  {groupedByMonthAndSJ.map((monthGroup) => {
+                    const totalQtyBulan = monthGroup.sjGroups.reduce(
+                      (sumSj, sjG) =>
+                        sumSj +
+                        sjG.items.reduce(
+                          (sumIt, it) => sumIt + (Number(it.qty) || 0),
+                          0
+                        ),
+                      0
+                    );
 
-                      <div className="space-y-4">
-                        {monthGroup.sjGroups.map((sjGroup) => {
-                          const totalQtySJ = sjGroup.items.reduce(
-                            (acc, item) => acc + (Number(item.qty) || 0),
-                            0
-                          );
+                    return (
+                      <div
+                        key={monthGroup.monthName}
+                        className="rounded-2xl border border-slate-700/80 bg-slate-950/50 p-4 md:p-6 space-y-5 shadow-2xl"
+                      >
+                        {/* HEADER BULAN YANG BESAR & JELAS TERPISAH */}
+                        <div className="px-5 py-4 rounded-xl bg-gradient-to-r from-emerald-950/90 via-slate-900 to-slate-900 border-l-4 border-l-emerald-400 border border-emerald-500/30 flex flex-wrap items-center justify-between gap-3 shadow-lg">
+                          <div className="flex items-center gap-3.5">
+                            <span className="text-2xl">📅</span>
+                            <div>
+                              <span className="block text-[11px] font-bold uppercase tracking-widest text-emerald-400">
+                                Periode Bulan
+                              </span>
+                              <h3 className="text-xl md:text-2xl font-black uppercase tracking-wide text-white">
+                                {monthGroup.monthName}
+                              </h3>
+                            </div>
+                          </div>
 
-                          return (
-                            <div
-                              key={sjGroup.key}
-                              className="rounded-xl border border-slate-800 bg-slate-950/60 overflow-hidden shadow-lg"
-                            >
-                              <div className="p-4 bg-slate-900/90 border-b border-slate-800 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-                                <div className="space-y-1.5">
-                                  <div className="flex flex-wrap items-center gap-2.5">
-                                    <span className="px-3 py-1 rounded-lg bg-cyan-500/10 text-cyan-300 border border-cyan-500/20 font-mono text-xs font-bold">
-                                      📄 SJ: {sjGroup.sj}
-                                    </span>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="px-3.5 py-1.5 rounded-xl bg-slate-950/90 border border-slate-700 text-xs font-bold text-slate-200">
+                              {monthGroup.sjGroups.length} Surat Jalan
+                            </span>
+                            <span className="px-3.5 py-1.5 rounded-xl bg-slate-950/90 border border-slate-700 text-xs font-bold text-cyan-300">
+                              {monthGroup.totalItemsCount} Item
+                            </span>
+                            <span className="px-3.5 py-1.5 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-xs font-black text-emerald-400">
+                              Total {totalQtyBulan} Unit
+                            </span>
+                          </div>
+                        </div>
 
-                                    {sjGroup.perusahaan && sjGroup.perusahaan !== '-' && (
-                                      <span className="px-3 py-1 rounded-lg bg-indigo-500/10 text-indigo-300 border border-indigo-500/20 text-xs font-bold">
-                                        🏢 {sjGroup.perusahaan}
+                        <div className="space-y-4">
+                          {monthGroup.sjGroups.map((sjGroup) => {
+                            const totalQtySJ = sjGroup.items.reduce(
+                              (acc, item) => acc + (Number(item.qty) || 0),
+                              0
+                            );
+
+                            return (
+                              <div
+                                key={sjGroup.key}
+                                className="rounded-xl border border-slate-800 bg-slate-950/80 overflow-hidden shadow-lg"
+                              >
+                                <div className="p-4 bg-slate-900/90 border-b border-slate-800 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                                  <div className="space-y-1.5">
+                                    <div className="flex flex-wrap items-center gap-2.5">
+                                      <span className="px-3 py-1 rounded-lg bg-cyan-500/10 text-cyan-300 border border-cyan-500/20 font-mono text-xs font-bold">
+                                        📄 SJ: {sjGroup.sj}
                                       </span>
+
+                                      {sjGroup.perusahaan && sjGroup.perusahaan !== '-' && (
+                                        <span className="px-3 py-1 rounded-lg bg-indigo-500/10 text-indigo-300 border border-indigo-500/20 text-xs font-bold">
+                                          🏢 {sjGroup.perusahaan}
+                                        </span>
+                                      )}
+
+                                      <span className="text-xs text-slate-400 font-medium">
+                                        🗓️ {sjGroup.tanggal}
+                                      </span>
+
+                                      <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-xs font-bold">
+                                        {sjGroup.items.length} Barang • Total {totalQtySJ}{' '}
+                                        Unit
+                                      </span>
+                                    </div>
+
+                                    {sjGroup.alamat && sjGroup.alamat !== '-' && (
+                                      <p className="text-xs text-slate-400">
+                                        📍 <span className="text-slate-300">{sjGroup.alamat}</span>
+                                      </p>
                                     )}
 
-                                    <span className="text-xs text-slate-400 font-medium">
-                                      🗓️ {sjGroup.tanggal}
-                                    </span>
-
-                                    <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-xs font-bold">
-                                      {sjGroup.items.length} Barang • Total {totalQtySJ}{' '}
-                                      Unit
-                                    </span>
+                                    {sjGroup.ket && sjGroup.ket !== '-' && (
+                                      <p className="text-xs text-slate-400">
+                                        📝 <span className="text-slate-300">{sjGroup.ket}</span>
+                                      </p>
+                                    )}
                                   </div>
 
-                                  {sjGroup.alamat && sjGroup.alamat !== '-' && (
-                                    <p className="text-xs text-slate-400">
-                                      📍 <span className="text-slate-300">{sjGroup.alamat}</span>
-                                    </p>
-                                  )}
+                                  <div className="flex items-center gap-2.5 self-start lg:self-center">
+                                    {sjGroup.foto_url && (
+                                      <a
+                                        href={sjGroup.foto_url}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs text-slate-200 transition-all"
+                                        title="Lihat Foto Surat Jalan / Barang"
+                                      >
+                                        <img
+                                          src={sjGroup.foto_url}
+                                          alt="Foto SJ"
+                                          className="w-6 h-6 object-cover rounded"
+                                        />
+                                        <span>Lihat Foto</span>
+                                      </a>
+                                    )}
 
-                                  {sjGroup.ket && sjGroup.ket !== '-' && (
-                                    <p className="text-xs text-slate-400">
-                                      📝 <span className="text-slate-300">{sjGroup.ket}</span>
-                                    </p>
-                                  )}
-                                </div>
-
-                                <div className="flex items-center gap-2.5 self-start lg:self-center">
-                                  {sjGroup.foto_url && (
-                                    <a
-                                      href={sjGroup.foto_url}
-                                      target="_blank"
-                                      rel="noreferrer"
-                                      className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs text-slate-200 transition-all"
-                                      title="Lihat Foto Surat Jalan / Barang"
+                                    <button
+                                      onClick={() => handlePrintSJGroupPDF(sjGroup)}
+                                      className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-xl text-xs font-semibold border border-slate-700 transition-all flex items-center gap-1.5"
+                                      title="Cetak Bukti PDF untuk seluruh barang dalam Surat Jalan ini"
                                     >
-                                      <img
-                                        src={sjGroup.foto_url}
-                                        alt="Foto SJ"
-                                        className="w-6 h-6 object-cover rounded"
-                                      />
-                                      <span>Lihat Foto</span>
-                                    </a>
-                                  )}
+                                      🖨️ Cetak PDF SJ
+                                    </button>
+                                  </div>
+                                </div>
 
-                                  <button
-                                    onClick={() => handlePrintSJGroupPDF(sjGroup)}
-                                    className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-xl text-xs font-semibold border border-slate-700 transition-all flex items-center gap-1.5"
-                                    title="Cetak Bukti PDF untuk seluruh barang dalam Surat Jalan ini"
-                                  >
-                                    🖨️ Cetak PDF SJ
-                                  </button>
+                                <div className="overflow-x-auto">
+                                  <table className="w-full text-left text-sm text-slate-300">
+                                    <thead className="bg-slate-950/70 text-slate-400 font-semibold uppercase text-[11px] border-b border-slate-800/80">
+                                      <tr>
+                                        <th className="py-2.5 px-4">Status</th>
+                                        <th className="py-2.5 px-4">Kategori</th>
+                                        <th className="py-2.5 px-4">Tipe Barang</th>
+                                        <th className="py-2.5 px-4">Nama Barang</th>
+                                        <th className="py-2.5 px-4">Serial Number (SN)</th>
+                                        <th className="py-2.5 px-4 text-emerald-400">
+                                          {activeTab === 'masuk' ? 'QTY Masuk' : 'QTY Keluar'}
+                                        </th>
+                                        {userRole !== 'viewer' && (
+                                          <th className="py-2.5 px-4 text-center">Aksi</th>
+                                        )}
+                                      </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-800/50">
+                                      {sjGroup.items.map((log) => {
+                                        const statusObj = parseStatusFromKet(log);
+                                        const isPinjamKeluar =
+                                          log.tipe === 'Barang Keluar' &&
+                                          statusObj.code === 'pinjam';
+
+                                        return (
+                                          <tr
+                                            key={log.id}
+                                            className="hover:bg-slate-800/30 transition-colors"
+                                          >
+                                            <td className="py-2.5 px-4">
+                                              <div className="flex flex-col items-start gap-1">
+                                                <span
+                                                  className={`inline-block px-2 py-0.5 rounded-full text-[11px] font-bold whitespace-nowrap border ${statusObj.badgeClass}`}
+                                                >
+                                                  {statusObj.label}
+                                                </span>
+                                                {statusObj.period && (
+                                                  <span className="text-[10px] text-amber-300/90 font-mono">
+                                                    {statusObj.period}
+                                                  </span>
+                                                )}
+                                              </div>
+                                            </td>
+
+                                            <td className="py-2.5 px-4">
+                                              {log.kategori && log.kategori !== '-' ? (
+                                                <span className="px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-300 border border-indigo-500/20 text-xs font-semibold">
+                                                  {log.kategori}
+                                                </span>
+                                              ) : (
+                                                <span className="text-xs text-slate-600">-</span>
+                                              )}
+                                            </td>
+
+                                            <td className="py-2.5 px-4">
+                                              {log.sub_kategori && log.sub_kategori !== '-' ? (
+                                                <span className="px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-xs text-slate-200">
+                                                  {log.sub_kategori}
+                                                </span>
+                                              ) : (
+                                                <span className="text-xs text-slate-600">-</span>
+                                              )}
+                                            </td>
+
+                                            <td className="py-2.5 px-4 font-semibold text-white">
+                                              {log.nama || '-'}
+                                            </td>
+
+                                            <td className="py-2.5 px-4 font-mono text-xs text-cyan-400">
+                                              {log.sn || '-'}
+                                            </td>
+
+                                            <td className="py-2.5 px-4 font-bold text-emerald-400">
+                                              {log.qty || 0} Unit
+                                            </td>
+
+                                            {userRole !== 'viewer' && (
+                                              <td className="py-2.5 px-4 text-center flex items-center justify-center gap-1.5">
+                                                {isPinjamKeluar && (
+                                                  <button
+                                                    onClick={() => openReturnModal(log)}
+                                                    className="px-2.5 py-1 bg-amber-500/10 hover:bg-amber-500 text-amber-400 hover:text-white rounded-lg text-xs font-medium border border-amber-500/20 transition-all"
+                                                    title="Kembalikan Stok Barang Pinjaman"
+                                                  >
+                                                    ↩ Balik
+                                                  </button>
+                                                )}
+
+                                                <button
+                                                  onClick={() => openEditModal(log)}
+                                                  className="px-2.5 py-1 bg-indigo-500/10 hover:bg-indigo-600 text-indigo-400 hover:text-white rounded-lg text-xs font-medium border border-indigo-500/20 transition-all"
+                                                  title="Edit Item Ini"
+                                                >
+                                                  ✏️ Edit
+                                                </button>
+
+                                                <button
+                                                  onClick={() => handleDelete(log)}
+                                                  className="px-2.5 py-1 bg-rose-500/10 hover:bg-rose-500 text-rose-400 hover:text-white rounded-lg text-xs font-medium border border-rose-500/20 transition-all"
+                                                >
+                                                  Hapus
+                                                </button>
+                                              </td>
+                                            )}
+                                          </tr>
+                                        );
+                                      })}
+                                    </tbody>
+                                  </table>
                                 </div>
                               </div>
-
-                              <div className="overflow-x-auto">
-                                <table className="w-full text-left text-sm text-slate-300">
-                                  <thead className="bg-slate-950/70 text-slate-400 font-semibold uppercase text-[11px] border-b border-slate-800/80">
-                                    <tr>
-                                      <th className="py-2.5 px-4">Status</th>
-                                      <th className="py-2.5 px-4">Kategori</th>
-                                      <th className="py-2.5 px-4">Tipe Barang</th>
-                                      <th className="py-2.5 px-4">Nama Barang</th>
-                                      <th className="py-2.5 px-4">Serial Number (SN)</th>
-                                      <th className="py-2.5 px-4 text-emerald-400">
-                                        {activeTab === 'masuk' ? 'QTY Masuk' : 'QTY Keluar'}
-                                      </th>
-                                      {userRole !== 'viewer' && (
-                                        <th className="py-2.5 px-4 text-center">Aksi</th>
-                                      )}
-                                    </tr>
-                                  </thead>
-                                  <tbody className="divide-y divide-slate-800/50">
-                                    {sjGroup.items.map((log) => {
-                                      const statusObj = parseStatusFromKet(log);
-                                      const isPinjamKeluar =
-                                        log.tipe === 'Barang Keluar' &&
-                                        statusObj.code === 'pinjam';
-
-                                      return (
-                                        <tr
-                                          key={log.id}
-                                          className="hover:bg-slate-800/30 transition-colors"
-                                        >
-                                          <td className="py-2.5 px-4">
-                                            <div className="flex flex-col items-start gap-1">
-                                              <span
-                                                className={`inline-block px-2 py-0.5 rounded-full text-[11px] font-bold whitespace-nowrap border ${statusObj.badgeClass}`}
-                                              >
-                                                {statusObj.label}
-                                              </span>
-                                              {statusObj.period && (
-                                                <span className="text-[10px] text-amber-300/90 font-mono">
-                                                  {statusObj.period}
-                                                </span>
-                                              )}
-                                            </div>
-                                          </td>
-
-                                          <td className="py-2.5 px-4">
-                                            {log.kategori && log.kategori !== '-' ? (
-                                              <span className="px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-300 border border-indigo-500/20 text-xs font-semibold">
-                                                {log.kategori}
-                                              </span>
-                                            ) : (
-                                              <span className="text-xs text-slate-600">-</span>
-                                            )}
-                                          </td>
-
-                                          <td className="py-2.5 px-4">
-                                            {log.sub_kategori && log.sub_kategori !== '-' ? (
-                                              <span className="px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-xs text-slate-200">
-                                                {log.sub_kategori}
-                                              </span>
-                                            ) : (
-                                              <span className="text-xs text-slate-600">-</span>
-                                            )}
-                                          </td>
-
-                                          <td className="py-2.5 px-4 font-semibold text-white">
-                                            {log.nama || '-'}
-                                          </td>
-
-                                          <td className="py-2.5 px-4 font-mono text-xs text-cyan-400">
-                                            {log.sn || '-'}
-                                          </td>
-
-                                          <td className="py-2.5 px-4 font-bold text-emerald-400">
-                                            {log.qty || 0} Unit
-                                          </td>
-
-                                          {userRole !== 'viewer' && (
-                                            <td className="py-2.5 px-4 text-center flex items-center justify-center gap-1.5">
-                                              {isPinjamKeluar && (
-                                                <button
-                                                  onClick={() => openReturnModal(log)}
-                                                  className="px-2.5 py-1 bg-amber-500/10 hover:bg-amber-500 text-amber-400 hover:text-white rounded-lg text-xs font-medium border border-amber-500/20 transition-all"
-                                                  title="Kembalikan Stok Barang Pinjaman"
-                                                >
-                                                  ↩ Balik
-                                                </button>
-                                              )}
-
-                                              <button
-                                                onClick={() => openEditModal(log)}
-                                                className="px-2.5 py-1 bg-indigo-500/10 hover:bg-indigo-600 text-indigo-400 hover:text-white rounded-lg text-xs font-medium border border-indigo-500/20 transition-all"
-                                                title="Edit Item Ini"
-                                              >
-                                                ✏️ Edit
-                                              </button>
-
-                                              <button
-                                                onClick={() => handleDelete(log)}
-                                                className="px-2.5 py-1 bg-rose-500/10 hover:bg-rose-500 text-rose-400 hover:text-white rounded-lg text-xs font-medium border border-rose-500/20 transition-all"
-                                              >
-                                                Hapus
-                                              </button>
-                                            </td>
-                                          )}
-                                        </tr>
-                                      );
-                                    })}
-                                  </tbody>
-                                </table>
-                              </div>
-                            </div>
-                          );
-                        })}
+                            );
+                          })}
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
